@@ -1,0 +1,75 @@
+.sectionLabel {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 24px 0 4px;
+}
+
+.fieldGroup {
+  padding: 18px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.fieldGroup:first-of-type {
+  border-top: 1px solid var(--line);
+}
+
+.fieldLabel {
+  font-size: 15px;
+  margin: 0 0 2px;
+}
+
+.fieldHelp {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0 0 12px;
+}
+
+.textInput {
+  width: 100%;
+  font-size: 15px;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 11px 13px;
+}
+
+.toggleRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 0;
+}
+
+.toggleRow + .toggleRow {
+  border-top: 1px solid var(--line);
+}
+
+.toggleText p {
+  margin: 0;
+}
+
+.aboutRow {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 0;
+  font-size: 14px;
+}
+
+.aboutRow span:first-child {
+  color: var(--muted);
+}
+
+.saveNote {
+  font-size: 13px;
+  color: var(--moss);
+  text-align: center;
+  height: 18px;
+  margin-top: 18px;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.saveNote.show {
+  opacity: 1;
+}

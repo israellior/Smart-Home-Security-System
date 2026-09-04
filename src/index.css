@@ -1,0 +1,80 @@
+/*
+ * Design tokens for Porchlight.
+ * Two themes, "day porch" (light, default) and "evening porch" (dark),
+ * rather than a generic light/dark swap. Components should only ever
+ * reference these variables, never hardcode colors, so a future
+ * feature automatically inherits the theme.
+ */
+
+:root {
+  --bg: #EDE7DB;
+  --panel: #E3DBC8;
+  --ink: #1C1712;
+  --muted: #6B6153;
+  --brass: #A9762F;
+  --brass-soft: rgba(169, 118, 47, 0.16);
+  --moss: #5C7350;
+  --ember: #9C4A2E;
+  --line: rgba(28, 23, 18, 0.14);
+
+  --font-display: "Fraunces", serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1C1712;
+    --panel: #241C15;
+    --ink: #EDE7DB;
+    --muted: #B0A48F;
+    --brass: #C9963E;
+    --brass-soft: rgba(201, 150, 62, 0.16);
+    --moss: #8FAE80;
+    --ember: #C1603D;
+    --line: rgba(237, 231, 219, 0.14);
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #1C1712;
+  --panel: #241C15;
+  --ink: #EDE7DB;
+  --muted: #B0A48F;
+  --brass: #C9963E;
+  --brass-soft: rgba(201, 150, 62, 0.16);
+  --moss: #8FAE80;
+  --ember: #C1603D;
+  --line: rgba(237, 231, 219, 0.14);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+body {
+  font-family: var(--font-body);
+  min-height: 100vh;
+  transition: background 0.3s ease, color 0.3s ease;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button,
+input {
+  font-family: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
+}

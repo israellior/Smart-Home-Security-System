@@ -1,0 +1,13 @@
+@"
+node_modules/
+dist/
+dist-ssr/
+.env
+.env.local
+.env.*.local
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+"@ | Out-File -Encoding utf8 .gitignore

@@ -1,0 +1,40 @@
+.tabs {
+  display: flex;
+  gap: 28px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tab {
+  background: none;
+  border: none;
+  font-family: inherit;
+  font-size: 15px;
+  color: var(--muted);
+  padding: 12px 0 14px;
+  cursor: pointer;
+  text-decoration: none;
+  position: relative;
+  transition: color 0.2s ease;
+}
+
+.tab.active {
+  color: var(--ink);
+}
+
+.tab.active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--brass);
+}
+
+@media (max-width: 380px) {
+  .tabs {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+}
