@@ -1,12 +1,11 @@
 import mongoose from 'mongoose';
 
-// One document per physical doorbell. Modeled as its own collection
-// (rather than fields on User) so a single account could eventually
-// manage more than one doorbell - the frontend just uses the first one
-// for now.
+// One document per physical doorbell. Who can see it is no longer a
+// field here - it lives in the Membership collection, so a device can be
+// shared with more than one account (a household) and a single account
+// can hold more than one doorbell.
 const deviceSchema = new mongoose.Schema(
   {
-    owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     name: { type: String, required: true, trim: true, default: 'Front Door' },
     location: { type: String, trim: true, default: '' },
     sensitivity: {
@@ -21,9 +20,23 @@ const deviceSchema = new mongoose.Schema(
     // once. Nothing sets this yet - it's here so the frontend's
     // "Connected" / "Not connected" status has a real field to read
     // instead of being hardcoded.
-    connected: { type: Boolean, default: false }
+    connected: { type: Boolean, default: false },
+    // The code another user types to join this device. Unique index is
+    // what actually guarantees no two devices share one; see
+    // utils/shareCode.js for why the alphabet excludes 0/O and 1/I/L.
+    shareCode: { type: String, required: true, unique: true, index: true }
   },
   { timestamps: true }
 );
+
+// Applies to every serialization path - res.json(), a populated
+// sub-document, an array - rather than relying on each controller to
+// remember. _id is kept deliberately: the frontend uses device._id.
+deviceSchema.set('toJSON', {
+  transform(doc, ret) {
+    delete ret.__v;
+    return ret;
+  }
+});
 
 export const Device = mongoose.model('Device', deviceSchema);

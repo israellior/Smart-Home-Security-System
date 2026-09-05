@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useReducer } from 'react';
 import { api } from '../api/client';
 
 const AuthContext = createContext(null);
@@ -20,67 +20,131 @@ function writeStoredToken(token) {
   }
 }
 
+// Logged out and never-logged-in are the same state, so they share one
+// object. Returning the identical reference also means React can skip a
+// re-render when we're already anonymous - safe only because nothing
+// ever mutates state in place.
+const ANONYMOUS = { status: 'anonymous', token: null, user: null };
+
 /**
- * Owns the JWT and the current user. On first load, if a token is
- * already in localStorage (from a previous visit), it's verified
- * against GET /api/auth/me rather than trusted blindly - an expired
- * or tampered token gets discarded instead of silently "logging in".
+ * A stored token is *unverified* until GET /api/auth/me says otherwise,
+ * which is why the initial status is 'checking' rather than
+ * 'authenticated' - an expired or tampered token gets discarded instead
+ * of silently "logging in".
+ */
+function init() {
+  const token = readStoredToken();
+  return token ? { status: 'checking', token, user: null } : ANONYMOUS;
+}
+
+/**
+ * Pure - no fetches, no localStorage, no navigation. That's what makes
+ * it testable in isolation ("from 'checking', a verification_failed
+ * action must produce ANONYMOUS") and what keeps it safe under
+ * StrictMode, which deliberately double-invokes reducers in dev to
+ * surface side effects hiding in here.
+ *
+ * The three facts auth has to track - is there a token, do we know whose
+ * it is, are we still finding out - were never independent of each
+ * other. Collapsing them into one status plus its payload means the
+ * combinations that used to be reachable by accident can't be written
+ * down: there is no way to produce a token that passed the check but
+ * carries no user.
+ */
+function authReducer(state, action) {
+  switch (action.type) {
+    case 'verified':
+      // Keeps the token already in state - this action only resolves
+      // *who* it belongs to.
+      return { status: 'authenticated', token: state.token, user: action.user };
+
+    case 'verification_failed':
+      return ANONYMOUS;
+
+    case 'signed_in':
+      // Login and register both hand back the token and the user
+      // together, so there is nothing left to look up afterwards.
+      return { status: 'authenticated', token: action.token, user: action.user };
+
+    case 'signed_out':
+      // Same resulting state as verification_failed, deliberately a
+      // different action: one is the user leaving, the other is a
+      // session expiring, and a log of these should tell them apart.
+      return ANONYMOUS;
+
+    default:
+      throw new Error(`Unknown auth action: ${action.type}`);
+  }
+}
+
+/**
+ * Owns the JWT and the current user. Every transition goes through
+ * authReducer, so the whole sequence is visible from one place - drop a
+ * console.log in the reducer and you get the entire session lifecycle
+ * in order, rather than reconstructing it from scattered setState calls.
  */
 export function AuthProvider({ children }) {
-  const [token, setTokenState] = useState(readStoredToken);
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [state, dispatch] = useReducer(authReducer, undefined, init);
+  const { status, token, user } = state;
 
-  const setToken = (next) => {
-    setTokenState(next);
-    writeStoredToken(next);
-  };
+  // Storage mirrors the token, whichever action changed it. Doing this
+  // as an effect rather than inside each transition keeps the reducer
+  // pure, and means a future action can't forget to keep the two in
+  // sync. Writing the same value back on mount is a harmless no-op.
+  useEffect(() => {
+    writeStoredToken(token);
+  }, [token]);
 
   useEffect(() => {
-    let cancelled = false;
+    // Only a token restored from a previous visit needs checking. After
+    // signed_in the status is already 'authenticated', so this never
+    // re-fetches a user the login response just handed us.
+    if (status !== 'checking') return undefined;
 
-    if (!token) {
-      setLoading(false);
-      return undefined;
-    }
+    let cancelled = false;
 
     api
       .me(token)
       .then(({ user }) => {
-        if (!cancelled) setUser(user);
+        if (cancelled) return;
+        // A 200 with no user is not a valid session. Treating it as a
+        // failure is what stops "authenticated but nobody's home" - the
+        // state that used to slip past ProtectedRoute and then hide the
+        // logout button, stranding you in a session you couldn't leave.
+        if (user) dispatch({ type: 'verified', user });
+        else dispatch({ type: 'verification_failed' });
       })
       .catch(() => {
-        if (!cancelled) setToken(null);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) dispatch({ type: 'verification_failed' });
       });
 
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [status, token]);
 
   const login = useCallback(async (email, password) => {
     const { token, user } = await api.login({ email, password });
-    setToken(token);
-    setUser(user);
+    dispatch({ type: 'signed_in', token, user });
   }, []);
 
   const register = useCallback(async (name, email, password) => {
     const { token, user } = await api.register({ name, email, password });
-    setToken(token);
-    setUser(user);
+    dispatch({ type: 'signed_in', token, user });
   }, []);
 
   const logout = useCallback(() => {
-    setToken(null);
-    setUser(null);
+    dispatch({ type: 'signed_out' });
   }, []);
 
+  // `loading` is derived, not stored - it was only ever "we have a token
+  // we haven't checked yet". Exposed under the old name so consumers
+  // don't all have to change at once; `status` is the better thing to
+  // read in new code.
+  const loading = status === 'checking';
+
   return (
-    <AuthContext.Provider value={{ token, user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ status, token, user, loading, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   );

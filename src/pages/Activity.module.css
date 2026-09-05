@@ -51,6 +51,16 @@
   font-size: 14px;
 }
 
+.error {
+  font-size: 13px;
+  color: var(--ember);
+  background: color-mix(in srgb, var(--ember) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ember) 35%, transparent);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 12px;
+}
+
 .eventTitle {
   font-size: 15px;
 }

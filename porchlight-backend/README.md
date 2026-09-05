@@ -62,11 +62,36 @@ register/login.
 | POST   | `/auth/register`              | `{ name, email, password }` → token |
 | POST   | `/auth/login`                 | `{ email, password }` → token       |
 | GET    | `/auth/me`             (auth) | Current user                        |
-| GET    | `/devices`              (auth)| List your device(s)                 |
-| POST   | `/devices`              (auth)| Create a device                     |
+| GET    | `/devices`              (auth)| Devices you're a member of, each with your `role` |
+| POST   | `/devices`              (auth)| Create a device — you become its owner |
+| POST   | `/devices/join`         (auth)| `{ shareCode }` → join someone else's device as a member |
+| GET    | `/devices/:id`          (auth)| One device (must be a member)       |
 | PATCH  | `/devices/:id`          (auth)| Update name/location/sensitivity/notifications |
+| DELETE | `/devices/:id`          (auth)| Delete a device — **owner only**, cascades events + memberships |
+| GET    | `/devices/:id/members`  (auth)| Who has access, and in what role    |
+| DELETE | `/devices/:id/members/:userId` (auth) | Remove someone (owner) or leave (yourself) |
 | GET    | `/devices/:deviceId/events` (auth) | Last 50 events for a device    |
 | POST   | `/devices/:deviceId/events` (auth) | Log an event: `{ type: "motion" \| "ring", meta }` |
+
+### Sharing model
+
+Access lives in a `Membership` collection — `{ device, user, role }` — rather
+than an `owner` field on the device. That's what lets one household share a
+doorbell and one account hold several. A compound unique index on
+`{ device, user }` makes joining idempotent: a double-tapped button can't
+grant two memberships.
+
+- **owner** — created the device. Can rename, delete, and manage access.
+  Sees the `shareCode`.
+- **member** — joined with a share code. Can view and change settings.
+  Cannot delete the device, remove other people, or see the share code.
+
+The owner cannot leave a device (there'd be nobody left to manage it) — they
+delete it instead. Transferring ownership isn't built yet.
+
+Share codes look like `PORCH-7K2M9P`, generated with `crypto.randomInt` over
+an alphabet that omits `0/O` and `1/I/L`, since these get read aloud. Input is
+normalized, so `porch 7k2m9p` and `7K2M9P` both work.
 
 ## Where this connects to the embedded (C/V4L2) side of the project
 
@@ -113,4 +138,27 @@ src/
 - **Same error message for "no such user" and "wrong password"** on
   login - returning different messages would let someone probe which
   emails have accounts (a real security consideration, not just
-  paranoia).
+  paranoia). The same reasoning is why a device you're not a member of
+  returns 404 rather than 403: 403 would confirm the id is real.
+  Owner-only actions *do* return 403, because there the caller can
+  already see the device - there's nothing left to hide, only a
+  permission to deny.
+- **Schema-level `toJSON` transforms** on every model strip `__v`, and
+  `passwordHash` on User. Doing it in the schema rather than per
+  response means it holds no matter how a document reaches the client -
+  including through `.populate('user')`, which the members list uses and
+  which would otherwise hand back a full user document.
+- **JWTs in `localStorage`, not an httpOnly cookie.** The usual advice
+  is the cookie, which protects the token from XSS exfiltration. This
+  app has close to no XSS surface (React escapes by default, no
+  `dangerouslySetInnerHTML`, three runtime dependencies, no third-party
+  scripts), and its realistic threat is a shared or stolen laptop -
+  which a cookie doesn't help with either, since it persists the same
+  way. The cookie's cost is real: CORS credentials, CSRF handling, flags
+  that differ dev vs prod, and logout becoming a server round-trip.
+  Revisit this the day any third-party script or user-generated markup
+  gets rendered.
+- **Retried Mongo connection on startup** (`config/db.js`) - the initial
+  TLS handshake to this Atlas cluster fails intermittently with a
+  server-side alert (not credentials, not the IP allowlist). Without a
+  retry, `npm run dev` fails to start a good fraction of the time.

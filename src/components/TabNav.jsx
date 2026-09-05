@@ -1,22 +1,25 @@
 import { NavLink } from 'react-router-dom';
 import styles from './TabNav.module.css';
 
-const TABS = [
-  { to: '/', label: 'Home', end: true },
-  { to: '/activity', label: 'Activity' },
-  { to: '/settings', label: 'Settings' }
-];
-
 /**
- * Real routes rather than JS-driven show/hide panels, so each page
- * (Home / Activity / Settings) is a first-class, linkable, back-button-
- * friendly URL. Adding a fourth tab later is just adding one entry here
- * plus a route in App.jsx.
+ * The three views of one doorbell. Scoped to a device rather than global
+ * now that an account can hold several - the tabs sit inside
+ * /devices/:deviceId, so each one is still a first-class, linkable,
+ * back-button-friendly URL rather than a JS-driven panel swap.
+ *
+ * Built per render because the hrefs depend on which device is open;
+ * there's no module-level constant to hoist any more.
  */
-export function TabNav() {
+export function TabNav({ deviceId }) {
+  const tabs = [
+    { to: `/devices/${deviceId}`, label: 'Overview', end: true },
+    { to: `/devices/${deviceId}/activity`, label: 'Activity' },
+    { to: `/devices/${deviceId}/settings`, label: 'Settings' }
+  ];
+
   return (
     <nav className={styles.tabs}>
-      {TABS.map((tab) => (
+      {tabs.map((tab) => (
         <NavLink
           key={tab.to}
           to={tab.to}

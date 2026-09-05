@@ -1,5 +1,6 @@
 import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import styles from './ProtectedRoute.module.css';
 
 /**
  * Gate for the "real app" routes (Home/Activity/Settings). Renders
@@ -11,7 +12,7 @@ export function ProtectedRoute() {
   const { token, loading } = useAuth();
 
   if (loading) {
-    return <p style={{ padding: '40px 0', textAlign: 'center', color: 'var(--muted)' }}>Loading…</p>;
+    return <p className={styles.loading}>Loading…</p>;
   }
 
   if (!token) {

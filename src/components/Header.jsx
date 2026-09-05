@@ -1,15 +1,18 @@
 import { Link } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
-import { useSettings } from '../context/SettingsContext';
 import styles from './Header.module.css';
 
+/**
+ * Global chrome only. The connected/not-connected pill used to live here
+ * back when there was exactly one doorbell; now that an account can hold
+ * several, that status belongs to a device rather than to the app - it's
+ * on each row of the Home list and on the device overview.
+ */
 export function Header() {
-  const { theme, toggleTheme } = useTheme();
+  const { resolvedTheme, toggleTheme } = useTheme();
   const { user, logout } = useAuth();
-  const { settings } = useSettings();
-  const isDark = theme === 'dark' || (!theme && window.matchMedia?.('(prefers-color-scheme: dark)').matches);
-  const connected = settings.connected;
+  const isDark = resolvedTheme === 'dark';
 
   return (
     <header className={styles.header}>
@@ -17,10 +20,6 @@ export function Header() {
         Porchlight
       </Link>
       <div className={styles.right}>
-        <div className={styles.statusPill}>
-          <span className={`${styles.statusDot} ${connected ? styles.connected : ''}`} />
-          <span>{connected ? 'Connected' : 'Not connected'}</span>
-        </div>
         <button
           className={styles.themeToggle}
           onClick={toggleTheme}

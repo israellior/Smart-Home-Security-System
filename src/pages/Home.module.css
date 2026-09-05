@@ -1,21 +1,44 @@
-.hero {
+.sectionLabel {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 8px 0 4px;
+}
+
+.loading {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.error {
+  font-size: 13px;
+  color: var(--ember);
+  background: color-mix(in srgb, var(--ember) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ember) 35%, transparent);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 12px;
+}
+
+.empty {
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
-  padding: 48px 0 40px;
+  padding: 40px 8px 32px;
 }
 
 .glowRing {
-  width: 148px;
-  height: 148px;
+  width: 116px;
+  height: 116px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   background: radial-gradient(circle at 50% 45%, var(--brass-soft), transparent 72%);
   border: 1px solid var(--line);
-  margin-bottom: 22px;
+  margin-bottom: 20px;
   position: relative;
   color: var(--muted);
 }
@@ -23,8 +46,8 @@
 .glowRing::before {
   content: '';
   position: absolute;
-  width: 54px;
-  height: 54px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   background: var(--panel);
   border: 1px solid var(--line);
@@ -34,42 +57,70 @@
   position: relative;
 }
 
-.deviceName {
+.empty p:nth-of-type(1) {
   font-family: var(--font-display);
-  font-size: 26px;
-  font-weight: 500;
-  margin: 0 0 6px;
+  font-size: 19px;
+  margin: 0 0 8px;
 }
 
-.deviceState {
+.empty p:nth-of-type(2) {
   font-size: 14px;
   color: var(--muted);
-  margin: 0 0 26px;
+  max-width: 300px;
+  margin: 0 auto;
+  line-height: 1.55;
 }
 
-.liveBtn {
-  font-family: inherit;
-  font-size: 14px;
-  color: var(--muted);
-  background: transparent;
-  border: 1px solid var(--line);
-  padding: 11px 22px;
-  border-radius: 999px;
-  cursor: not-allowed;
+.deviceRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 4px;
+  border-bottom: 1px solid var(--line);
+  text-decoration: none;
+  color: inherit;
+  transition: opacity 0.2s ease;
 }
 
-.heroNote {
+.deviceRow:hover {
+  opacity: 0.72;
+}
+
+.statusDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.statusDot.connected {
+  background: var(--moss);
+  opacity: 1;
+}
+
+.deviceText {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.deviceName {
+  font-size: 16px;
+}
+
+.deviceMeta {
   font-size: 13px;
   color: var(--muted);
-  max-width: 320px;
-  margin: 18px auto 0;
-  line-height: 1.5;
 }
 
-.sectionLabel {
-  font-size: 13px;
+.chevron {
   color: var(--muted);
-  margin: 34px 0 4px;
+  font-size: 18px;
+  flex-shrink: 0;
 }
 
 .addDevice {
@@ -83,7 +134,7 @@
   padding: 15px;
   border-radius: 10px;
   cursor: pointer;
-  margin-top: 8px;
+  margin-top: 24px;
   transition: opacity 0.2s ease;
   text-align: center;
   text-decoration: none;

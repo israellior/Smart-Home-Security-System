@@ -1,0 +1,103 @@
+.hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 40px 0 36px;
+}
+
+.glowRing {
+  width: 148px;
+  height: 148px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 50% 45%, var(--brass-soft), transparent 72%);
+  border: 1px solid var(--line);
+  margin-bottom: 22px;
+  position: relative;
+  color: var(--muted);
+}
+
+.glowRing::before {
+  content: '';
+  position: absolute;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+
+.glowRing svg {
+  position: relative;
+}
+
+.deviceName {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 500;
+  margin: 0 0 6px;
+}
+
+.deviceState {
+  font-size: 14px;
+  color: var(--muted);
+  margin: 0 0 4px;
+}
+
+.deviceLocation {
+  font-size: 13px;
+  color: var(--muted);
+  opacity: 0.8;
+  margin: 0 0 20px;
+}
+
+.liveBtn {
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  padding: 11px 22px;
+  border-radius: 999px;
+  cursor: not-allowed;
+  margin-top: 18px;
+}
+
+.heroNote {
+  font-size: 13px;
+  color: var(--muted);
+  max-width: 320px;
+  margin: 18px auto 0;
+  line-height: 1.5;
+}
+
+.sectionLabel {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 24px 0 4px;
+}
+
+.settingsLink {
+  display: block;
+  width: 100%;
+  font-family: inherit;
+  font-size: 15px;
+  color: var(--bg);
+  background: var(--brass);
+  border: none;
+  padding: 15px;
+  border-radius: 10px;
+  cursor: pointer;
+  margin-top: 8px;
+  transition: opacity 0.2s ease;
+  text-align: center;
+  text-decoration: none;
+  box-sizing: border-box;
+}
+
+.settingsLink:hover {
+  opacity: 0.88;
+}

@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { useSettings } from '../context/SettingsContext';
+import { useDevice } from '../components/DeviceLayout';
 import { api } from '../api/client';
 import styles from './Activity.module.css';
 
 // Stand-in data shown only when the real device has no events yet, so
-// a brand-new account isn't just a blank page - it's an honestly
+// a brand-new doorbell isn't just a blank page - it's an honestly
 // labeled preview of what real motion/ring events will look like.
 const PREVIEW_EVENTS = [
   { id: 'p1', title: 'Motion detected', time: '2:14 PM' },
@@ -20,20 +20,26 @@ const EVENT_TITLES = {
 
 export function Activity() {
   const { token } = useAuth();
-  const { deviceId } = useSettings();
+  const device = useDevice();
+  const deviceId = device._id;
+
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
+    setError(null);
 
     async function load() {
-      if (!deviceId) return;
       try {
         const { events } = await api.listEvents(token, deviceId);
         if (!cancelled) setEvents(events);
       } catch (err) {
-        // Non-fatal for this page - just fall back to the empty state.
+        // Say so rather than showing the "Nothing here yet" empty state -
+        // we don't actually know that it's empty.
+        if (!cancelled) setError(err.message);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -43,6 +49,9 @@ export function Activity() {
     return () => {
       cancelled = true;
     };
+    // DeviceLayout resolves the device before this page renders, so
+    // deviceId is always a real id here - no waiting-for-a-prerequisite
+    // state to model, which is what used to strand this page on "Loading".
   }, [token, deviceId]);
 
   const hasRealEvents = events.length > 0;
@@ -53,7 +62,9 @@ export function Activity() {
 
       {loading && <p className={styles.loading}>Loading…</p>}
 
-      {!loading && hasRealEvents && (
+      {!loading && error && <p className={styles.error}>{error}</p>}
+
+      {!loading && !error && hasRealEvents && (
         <div>
           {events.map((event) => (
             <div className={styles.eventRow} key={event._id}>
@@ -64,7 +75,7 @@ export function Activity() {
         </div>
       )}
 
-      {!loading && !hasRealEvents && (
+      {!loading && !error && !hasRealEvents && (
         <>
           <div className={styles.empty}>
             <p>Nothing here yet</p>
