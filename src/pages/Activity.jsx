@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useDevices } from '../context/DevicesContext';
 import { useDevice } from '../components/DeviceLayout';
 import { api } from '../api/client';
 import styles from './Activity.module.css';
@@ -20,12 +21,19 @@ const EVENT_TITLES = {
 
 export function Activity() {
   const { token } = useAuth();
+  const { markSeen } = useDevices();
   const device = useDevice();
   const deviceId = device._id;
 
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Frozen on open, deliberately. Opening this page marks everything as
+  // seen, so reading the live watermark would make the "New" heading
+  // disappear from under you the moment it rendered. This keeps the split
+  // showing what was new when you arrived; next visit it's cleared.
+  const [seenAtOnOpen] = useState(() => device.lastSeenAt);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,29 +62,71 @@ export function Activity() {
     // state to model, which is what used to strand this page on "Loading".
   }, [token, deviceId]);
 
+  // Opening the activity list is what "seeing" the events means, so the
+  // watermark moves on arrival rather than waiting for the fetch - the
+  // split above already captured what was new. Safe to run twice under
+  // StrictMode: setting lastSeenAt to now is idempotent.
+  useEffect(() => {
+    markSeen(deviceId);
+  }, [deviceId, markSeen]);
+
   const hasRealEvents = events.length > 0;
+
+  // Split against the frozen watermark. A null watermark means this list
+  // has never been opened, so everything counts as new.
+  const isNew = (event) => !seenAtOnOpen || new Date(event.createdAt) > new Date(seenAtOnOpen);
+  const newEvents = events.filter(isNew);
+  const earlierEvents = events.filter((event) => !isNew(event));
+
+  const renderRow = (event, markNew) => (
+    <div className={`${styles.eventRow} ${markNew ? styles.isNew : ''}`} key={event._id}>
+      <span className={styles.eventTitle}>{EVENT_TITLES[event.type] || event.type}</span>
+      <span className={styles.eventTime}>{new Date(event.createdAt).toLocaleString()}</span>
+    </div>
+  );
 
   return (
     <section>
-      <p className={styles.sectionLabel}>Recent activity</p>
+      {loading && (
+        <>
+          <p className={styles.sectionLabel}>Recent activity</p>
+          <p className={styles.loading}>Loading…</p>
+        </>
+      )}
 
-      {loading && <p className={styles.loading}>Loading…</p>}
-
-      {!loading && error && <p className={styles.error}>{error}</p>}
+      {!loading && error && (
+        <>
+          <p className={styles.sectionLabel}>Recent activity</p>
+          <p className={styles.error}>{error}</p>
+        </>
+      )}
 
       {!loading && !error && hasRealEvents && (
-        <div>
-          {events.map((event) => (
-            <div className={styles.eventRow} key={event._id}>
-              <span className={styles.eventTitle}>{EVENT_TITLES[event.type] || event.type}</span>
-              <span className={styles.eventTime}>{new Date(event.createdAt).toLocaleString()}</span>
-            </div>
-          ))}
-        </div>
+        <>
+          {newEvents.length > 0 && (
+            <>
+              <p className={styles.sectionLabel}>
+                New
+                <span className={styles.newCount}>{newEvents.length}</span>
+              </p>
+              <div>{newEvents.map((event) => renderRow(event, true))}</div>
+            </>
+          )}
+
+          {earlierEvents.length > 0 && (
+            <>
+              <p className={styles.sectionLabel}>
+                {newEvents.length > 0 ? 'Earlier' : 'Recent activity'}
+              </p>
+              <div>{earlierEvents.map((event) => renderRow(event, false))}</div>
+            </>
+          )}
+        </>
       )}
 
       {!loading && !error && !hasRealEvents && (
         <>
+          <p className={styles.sectionLabel}>Recent activity</p>
           <div className={styles.empty}>
             <p>Nothing here yet</p>
             <p>

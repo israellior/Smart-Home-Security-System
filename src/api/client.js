@@ -41,6 +41,11 @@ export const api = {
     request('/devices/join', { method: 'POST', body: { shareCode }, token }),
   updateDevice: (token, id, patch) =>
     request(`/devices/${id}`, { method: 'PATCH', body: patch, token }),
+  // Notification preferences are yours alone, so they write your
+  // membership rather than the shared device.
+  updatePreferences: (token, id, prefs) =>
+    request(`/devices/${id}/preferences`, { method: 'PATCH', body: prefs, token }),
+  markSeen: (token, id) => request(`/devices/${id}/seen`, { method: 'POST', token }),
   deleteDevice: (token, id) => request(`/devices/${id}`, { method: 'DELETE', token }),
 
   listMembers: (token, id) => request(`/devices/${id}/members`, { token }),

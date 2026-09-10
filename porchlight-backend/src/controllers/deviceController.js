@@ -9,17 +9,58 @@ import { generateShareCode, normalizeShareCode } from '../utils/shareCode.js';
 // back a whole device document doesn't get an error, it just can't
 // escalate anything. `connected` is absent on purpose: only real
 // hardware reporting in should ever flip it.
-const EDITABLE_FIELDS = ['name', 'location', 'sensitivity', 'notifMotion', 'notifRing', 'notifDaily'];
+const EDITABLE_FIELDS = ['name', 'location', 'sensitivity'];
+
+// Per-person, per-device. Set on the caller's Membership, not the Device.
+const NOTIFICATION_PREFS = ['notifMotion', 'notifRing', 'notifDaily'];
 
 /**
- * Shapes a device for one particular member. The share code is the
- * credential that grants access to this doorbell, so only the owner -
- * the person entitled to hand out access - ever sees it.
+ * Shapes a device for one particular member: the device's own fields,
+ * plus that member's role and their personal notification preferences.
+ *
+ * Flattening the preferences onto the device keeps the response shape
+ * the client already expects (device.notifMotion), even though they now
+ * come from a different collection. Only the write path had to change.
+ *
+ * The share code is the credential that grants access to this doorbell,
+ * so only the owner - the person entitled to hand out access - sees it.
  */
-function deviceForMember(device, role) {
+function deviceForMember(device, membership) {
   const json = device.toJSON();
-  if (role !== 'owner') delete json.shareCode;
-  return { ...json, role };
+  if (membership.role !== 'owner') delete json.shareCode;
+
+  for (const key of NOTIFICATION_PREFS) json[key] = membership[key];
+  json.role = membership.role;
+  json.lastSeenAt = membership.lastSeenAt;
+
+  return json;
+}
+
+/**
+ * How many events each device has seen since that membership last looked.
+ *
+ * Every device has its own watermark, so the naive shape is one count
+ * query per device - an N+1 that grows with someone's device list. This
+ * folds them into a single aggregation: one $or branch per device, each
+ * an indexed range seek on { device, createdAt }, grouped by device.
+ */
+async function newEventCountsByDevice(memberships) {
+  const branches = memberships
+    .filter((m) => m.device)
+    .map((m) => ({
+      device: m.device._id,
+      // Never looked means everything counts as new.
+      createdAt: { $gt: m.lastSeenAt || new Date(0) }
+    }));
+
+  if (branches.length === 0) return new Map();
+
+  const rows = await Event.aggregate([
+    { $match: { $or: branches } },
+    { $group: { _id: '$device', count: { $sum: 1 } } }
+  ]);
+
+  return new Map(rows.map((r) => [String(r._id), r.count]));
 }
 
 export async function listDevices(req, res) {
@@ -27,17 +68,33 @@ export async function listDevices(req, res) {
     .populate('device')
     .sort({ createdAt: 1 });
 
+  const counts = await newEventCountsByDevice(memberships);
+
   const devices = memberships
     // A membership whose device was deleted shouldn't break the whole
     // list - skip it rather than throwing on a null populate.
     .filter((m) => m.device)
-    .map((m) => deviceForMember(m.device, m.role));
+    .map((m) => ({
+      ...deviceForMember(m.device, m),
+      newEventCount: counts.get(String(m.device._id)) || 0
+    }));
 
   return res.json({ devices });
 }
 
+/**
+ * Moves the caller's watermark to now - "I've seen the activity list".
+ * Writes only the caller's membership, so like preferences it needs no
+ * permission check beyond already having access.
+ */
+export async function markDeviceSeen(req, res) {
+  req.membership.lastSeenAt = new Date();
+  await req.membership.save();
+  return res.json({ lastSeenAt: req.membership.lastSeenAt });
+}
+
 export async function getDevice(req, res) {
-  return res.json({ device: deviceForMember(req.device, req.membership.role) });
+  return res.json({ device: deviceForMember(req.device, req.membership) });
 }
 
 export async function createDevice(req, res) {
@@ -64,8 +121,12 @@ export async function createDevice(req, res) {
     return res.status(503).json({ error: 'Could not allocate a share code, please try again' });
   }
 
-  await Membership.create({ device: device._id, user: req.userId, role: 'owner' });
-  return res.status(201).json({ device: deviceForMember(device, 'owner') });
+  const membership = await Membership.create({
+    device: device._id,
+    user: req.userId,
+    role: 'owner'
+  });
+  return res.status(201).json({ device: deviceForMember(device, membership) });
 }
 
 /**
@@ -87,21 +148,24 @@ export async function joinDevice(req, res) {
 
   const existing = await Membership.findOne({ device: device._id, user: req.userId });
   if (existing) {
-    return res.json({ device: deviceForMember(device, existing.role), alreadyMember: true });
+    return res.json({ device: deviceForMember(device, existing), alreadyMember: true });
   }
 
+  let membership;
   try {
-    await Membership.create({ device: device._id, user: req.userId, role: 'member' });
+    membership = await Membership.create({ device: device._id, user: req.userId, role: 'member' });
   } catch (err) {
     // Two joins landed at once; the index rejected the loser. The caller
-    // is a member either way, so this is a success, not a failure.
+    // is a member either way, so this is a success, not a failure - read
+    // back the winner's membership so the response carries real prefs.
     if (err.code === 11000) {
-      return res.json({ device: deviceForMember(device, 'member'), alreadyMember: true });
+      const won = await Membership.findOne({ device: device._id, user: req.userId });
+      return res.json({ device: deviceForMember(device, won), alreadyMember: true });
     }
     throw err;
   }
 
-  return res.status(201).json({ device: deviceForMember(device, 'member') });
+  return res.status(201).json({ device: deviceForMember(device, membership) });
 }
 
 export async function updateDevice(req, res) {
@@ -112,7 +176,25 @@ export async function updateDevice(req, res) {
   }
 
   await device.save();
-  return res.json({ device: deviceForMember(device, req.membership.role) });
+  return res.json({ device: deviceForMember(device, req.membership) });
+}
+
+/**
+ * Updates the caller's own notification preferences for this device.
+ * Separate from PATCH /devices/:id because it writes a different
+ * document: your membership, not the shared device. Any member may call
+ * it, and it can only ever affect the caller - there's no way to express
+ * "change someone else's alerts", by construction rather than by check.
+ */
+export async function updatePreferences(req, res) {
+  const { membership } = req;
+
+  for (const key of NOTIFICATION_PREFS) {
+    if (key in req.body) membership[key] = Boolean(req.body[key]);
+  }
+
+  await membership.save();
+  return res.json({ device: deviceForMember(req.device, membership) });
 }
 
 export async function deleteDevice(req, res) {

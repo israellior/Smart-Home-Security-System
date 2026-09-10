@@ -5,6 +5,8 @@ import {
   createDevice,
   joinDevice,
   updateDevice,
+  updatePreferences,
+  markDeviceSeen,
   deleteDevice,
   listMembers,
   removeMember
@@ -28,6 +30,11 @@ deviceRoutes.post('/join', joinDevice);
 // stacks on top for the two actions members shouldn't have.
 deviceRoutes.get('/:id', requireDeviceAccess, getDevice);
 deviceRoutes.patch('/:id', requireDeviceAccess, updateDevice);
+// Writes the caller's membership rather than the device, so it needs no
+// owner check: it can only ever change the caller's own preferences.
+deviceRoutes.patch('/:id/preferences', requireDeviceAccess, updatePreferences);
+// Same shape: writes only the caller's own membership watermark.
+deviceRoutes.post('/:id/seen', requireDeviceAccess, markDeviceSeen);
 deviceRoutes.delete('/:id', requireDeviceAccess, requireDeviceOwner, deleteDevice);
 
 deviceRoutes.get('/:id/members', requireDeviceAccess, listMembers);

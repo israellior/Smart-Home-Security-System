@@ -44,6 +44,23 @@
   opacity: 0.55;
 }
 
+/* An accent on the leading edge rather than a background wash - the rows
+   still read as one list, but the new ones are findable at a glance. */
+.eventRow.isNew {
+  border-left: 2px solid var(--brass);
+  padding-left: 12px;
+  margin-left: -14px;
+}
+
+.newCount {
+  font-size: 11px;
+  color: var(--bg);
+  background: var(--brass);
+  border-radius: 999px;
+  padding: 2px 8px;
+  margin-left: 8px;
+}
+
 .loading {
   padding: 40px 0;
   text-align: center;

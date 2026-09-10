@@ -14,7 +14,7 @@ const SENSITIVITY_OPTIONS = [
 
 export function Settings() {
   const device = useDevice();
-  const { updateDevice } = useDevices();
+  const { updateDevice, updatePreferences } = useDevices();
   const [showSaved, setShowSaved] = useState(false);
   const saveTimer = useRef(null);
 
@@ -37,6 +37,14 @@ export function Settings() {
   // on every keystroke while still updating the device list live.
   const commitAndFlash = (fields) => {
     patch(fields);
+    flashSaved();
+  };
+
+  // Notification toggles write your membership, not the device. Everything
+  // above this line is shared with whoever else has access; these three
+  // are yours alone.
+  const commitPrefsAndFlash = (prefs) => {
+    updatePreferences(device._id, prefs);
     flashSaved();
   };
 
@@ -85,6 +93,9 @@ export function Settings() {
 
       <p className={styles.sectionLabel}>Notifications</p>
       <div className={styles.fieldGroup}>
+        <p className={styles.fieldHelp}>
+          Just for you — other people sharing this doorbell set their own.
+        </p>
         <div className={styles.toggleRow}>
           <div className={styles.toggleText}>
             <p className={styles.fieldLabel}>Motion detected</p>
@@ -92,7 +103,7 @@ export function Settings() {
           <Toggle
             label="Motion detected notifications"
             checked={device.notifMotion}
-            onChange={(notifMotion) => commitAndFlash({ notifMotion })}
+            onChange={(notifMotion) => commitPrefsAndFlash({ notifMotion })}
           />
         </div>
         <div className={styles.toggleRow}>
@@ -102,7 +113,7 @@ export function Settings() {
           <Toggle
             label="Doorbell ring notifications"
             checked={device.notifRing}
-            onChange={(notifRing) => commitAndFlash({ notifRing })}
+            onChange={(notifRing) => commitPrefsAndFlash({ notifRing })}
           />
         </div>
         <div className={styles.toggleRow}>
@@ -112,7 +123,7 @@ export function Settings() {
           <Toggle
             label="Daily summary notifications"
             checked={device.notifDaily}
-            onChange={(notifDaily) => commitAndFlash({ notifDaily })}
+            onChange={(notifDaily) => commitPrefsAndFlash({ notifDaily })}
           />
         </div>
       </div>

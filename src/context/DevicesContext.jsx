@@ -85,6 +85,44 @@ export function DevicesProvider({ children }) {
     [token]
   );
 
+  // Same optimistic shape as updateDevice, but a different endpoint: it
+  // writes the caller's membership. The response still carries the whole
+  // device, so consumers can't tell the difference.
+  const updatePreferences = useCallback(
+    async (id, prefs) => {
+      setDevices((prev) => prev.map((d) => (d._id === id ? { ...d, ...prefs } : d)));
+      try {
+        const { device } = await api.updatePreferences(token, id, prefs);
+        setDevices((prev) => prev.map((d) => (d._id === id ? device : d)));
+      } catch (err) {
+        setError(err.message);
+      }
+    },
+    [token]
+  );
+
+  /**
+   * Moves this device's "seen" watermark to now and clears its unread
+   * count locally. Deliberately not optimistic: the badge disappearing
+   * before the server agreed would be a lie if the request then failed,
+   * and there's no user action waiting on it.
+   */
+  const markSeen = useCallback(
+    async (id) => {
+      try {
+        const { lastSeenAt } = await api.markSeen(token, id);
+        setDevices((prev) =>
+          prev.map((d) => (d._id === id ? { ...d, lastSeenAt, newEventCount: 0 } : d))
+        );
+      } catch (err) {
+        // Failing to mark as read is not worth interrupting anyone over -
+        // the events are on screen either way, and the next visit retries.
+        console.warn('Could not mark device as seen:', err.message);
+      }
+    },
+    [token]
+  );
+
   const deleteDevice = useCallback(
     async (id) => {
       await api.deleteDevice(token, id);
@@ -112,6 +150,8 @@ export function DevicesProvider({ children }) {
         addDevice,
         joinDevice,
         updateDevice,
+        updatePreferences,
+        markSeen,
         deleteDevice,
         leaveDevice
       }}

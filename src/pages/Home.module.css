@@ -1,7 +1,33 @@
+.greeting {
+  padding: 26px 0 30px;
+}
+
+.greetingLine {
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  margin: 0 0 8px;
+}
+
+.greetingSub {
+  font-size: 14px;
+  color: var(--muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* When something is waiting, the line earns a little more presence -
+   the porch light is on for a reason. */
+.greetingSub.hasNew {
+  color: var(--brass);
+}
+
 .sectionLabel {
   font-size: 13px;
   color: var(--muted);
-  margin: 8px 0 4px;
+  margin: 8px 0 10px;
 }
 
 .loading {
@@ -74,16 +100,36 @@
 .deviceRow {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 18px 4px;
-  border-bottom: 1px solid var(--line);
+  gap: 13px;
+  padding: 16px 17px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  margin-bottom: 10px;
   text-decoration: none;
   color: inherit;
-  transition: opacity 0.2s ease;
+  transition: border-color 0.2s ease, transform 0.15s ease;
 }
 
 .deviceRow:hover {
-  opacity: 0.72;
+  border-color: var(--brass);
+  transform: translateY(-1px);
+}
+
+.deviceRow:active {
+  transform: translateY(0);
+}
+
+/* Respect a stated preference for less motion - the lift is decoration,
+   not information. */
+@media (prefers-reduced-motion: reduce) {
+  .deviceRow {
+    transition: border-color 0.2s ease;
+  }
+
+  .deviceRow:hover {
+    transform: none;
+  }
 }
 
 .statusDot {
@@ -117,30 +163,57 @@
   color: var(--muted);
 }
 
+.newBadge {
+  font-size: 12px;
+  color: var(--bg);
+  background: var(--brass);
+  border-radius: 999px;
+  padding: 2px 9px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
 .chevron {
   color: var(--muted);
   font-size: 18px;
   flex-shrink: 0;
 }
 
+/* Secondary once you already have doorbells: an outline rather than the
+   solid brass fill, so the list stays the focus of the page. The solid
+   treatment is kept for the empty state, where adding one IS the task. */
 .addDevice {
   display: block;
   width: 100%;
   font-family: inherit;
   font-size: 15px;
-  color: var(--bg);
-  background: var(--brass);
-  border: none;
+  color: var(--brass);
+  background: transparent;
+  border: 1px dashed var(--line);
   padding: 15px;
-  border-radius: 10px;
+  border-radius: 12px;
   cursor: pointer;
-  margin-top: 24px;
-  transition: opacity 0.2s ease;
+  margin-top: 14px;
+  transition: border-color 0.2s ease, background 0.2s ease;
   text-align: center;
   text-decoration: none;
   box-sizing: border-box;
 }
 
 .addDevice:hover {
+  border-color: var(--brass);
+  background: var(--brass-soft);
+}
+
+.empty + .addDevice {
+  color: var(--bg);
+  background: var(--brass);
+  border: none;
+  border-style: solid;
+  margin-top: 24px;
+}
+
+.empty + .addDevice:hover {
+  background: var(--brass);
   opacity: 0.88;
 }

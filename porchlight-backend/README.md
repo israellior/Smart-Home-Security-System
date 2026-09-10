@@ -66,11 +66,13 @@ register/login.
 | POST   | `/devices`              (auth)| Create a device — you become its owner |
 | POST   | `/devices/join`         (auth)| `{ shareCode }` → join someone else's device as a member |
 | GET    | `/devices/:id`          (auth)| One device (must be a member)       |
-| PATCH  | `/devices/:id`          (auth)| Update name/location/sensitivity/notifications |
+| PATCH  | `/devices/:id`          (auth)| Update name/location/sensitivity (shared by all members) |
+| PATCH  | `/devices/:id/preferences` (auth) | Your own notification preferences for this device |
+| POST   | `/devices/:id/seen`     (auth)| Mark the activity list as read (moves your watermark) |
 | DELETE | `/devices/:id`          (auth)| Delete a device — **owner only**, cascades events + memberships |
 | GET    | `/devices/:id/members`  (auth)| Who has access, and in what role    |
 | DELETE | `/devices/:id/members/:userId` (auth) | Remove someone (owner) or leave (yourself) |
-| GET    | `/devices/:deviceId/events` (auth) | Last 50 events for a device    |
+| GET    | `/devices/:deviceId/events` (auth) | Events, newest first. `?limit=` (max 100) and `?before=<cursor>` |
 | POST   | `/devices/:deviceId/events` (auth) | Log an event: `{ type: "motion" \| "ring", meta }` |
 
 ### Sharing model
@@ -92,6 +94,51 @@ delete it instead. Transferring ownership isn't built yet.
 Share codes look like `PORCH-7K2M9P`, generated with `crypto.randomInt` over
 an alphabet that omits `0/O` and `1/I/L`, since these get read aloud. Input is
 normalized, so `porch 7k2m9p` and `7K2M9P` both work.
+
+## Notifications
+
+Two different things, deliberately kept apart:
+
+- **Seeing** an event — everyone with access sees every event in the activity
+  list. Shared, unfiltered, stored once.
+- **Being notified** about it — opt-in, per person, per doorbell, pushed out
+  to a phone or an inbox.
+
+Because the event is already shared and stored once, there is no per-user
+notification row duplicating its content. At 100k devices × 50 events/day
+that would be four times the writes and storage to say nothing the event
+list doesn't already say.
+
+**Unread** is a watermark, not a flag. `Membership.lastSeenAt` is one
+timestamp; "new events" is a range scan on the `{ device, createdAt }` index
+Event already has. That's O(1) storage per person-per-device instead of
+O(events × members). `GET /devices` folds every device's count into a single
+aggregation rather than one count query per device.
+
+**Dispatch** (`src/services/notifications/`) costs a fixed three queries no
+matter how many members a device has: memberships with the preference on,
+all their push subscriptions in one `$in`, then one `insertMany` for the
+delivery log. `createEvent` responds `201` *before* dispatching — recording
+that motion happened is the job that matters, and telling people is
+best-effort on top. That call site is where a job queue slots in at real
+volume, without callers changing.
+
+**Channels** (`src/services/notifications/channels/`) are `webPush` and
+`email`. Both are **stubs**: they resolve recipients, honour preferences, and
+log an honest `skipped` reason rather than pretending to succeed. Each names
+in its header exactly what finishing it requires. Nothing else has to change.
+
+**`NotificationDelivery`** records one row per attempt — a pointer plus an
+outcome, not a copy of the content. It exists to answer "why didn't I get an
+alert?", which is otherwise unanswerable: preference off, no subscription,
+provider rejected it, or channel not configured are four different rows. A
+TTL index prunes them after 30 days with no cron job.
+
+**Events are paged by cursor**, never `skip`/`limit`. `.skip(n)` makes Mongo
+walk and discard n documents, so page 1000 costs a thousand times page 1. The
+cursor encodes `createdAt` *and* `_id`, because a motion detector firing
+several frames in one second produces events sharing a timestamp, and
+`createdAt` alone would skip or repeat them.
 
 ## Where this connects to the embedded (C/V4L2) side of the project
 

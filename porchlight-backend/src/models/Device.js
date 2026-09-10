@@ -13,9 +13,11 @@ const deviceSchema = new mongoose.Schema(
       enum: ['low', 'standard', 'high'],
       default: 'standard'
     },
-    notifMotion: { type: Boolean, default: true },
-    notifRing: { type: Boolean, default: true },
-    notifDaily: { type: Boolean, default: false },
+    // Notification preferences used to live here. They moved to
+    // Membership, because they belong to a person's relationship with a
+    // doorbell rather than to the doorbell itself - see
+    // scripts/migrate-notification-prefs.mjs.
+    //
     // True once real hardware has connected and reported in at least
     // once. Nothing sets this yet - it's here so the frontend's
     // "Connected" / "Not connected" status has a real field to read

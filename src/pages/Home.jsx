@@ -1,7 +1,26 @@
 import { Link } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import { useDevices } from '../context/DevicesContext';
 import { GlowIcon } from '../components/GlowIcon';
 import styles from './Home.module.css';
+
+/**
+ * The themes are "day porch" and "evening porch" rather than a generic
+ * light/dark pair, so the greeting follows the same clock the look does.
+ */
+function greetingFor(hour) {
+  if (hour < 5) return 'Still up';
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
+// "Ada Lovelace" -> "Ada". A greeting uses the name someone is called,
+// not the one on their account.
+function firstName(name) {
+  const first = String(name || '').trim().split(/\s+/)[0];
+  return first || 'there';
+}
 
 /**
  * The list of doorbells this account can see - owned and shared alike.
@@ -10,12 +29,33 @@ import styles from './Home.module.css';
  * rather than the account.
  */
 export function Home() {
+  const { user } = useAuth();
   const { devices, loading, error } = useDevices();
 
   const hasDevices = devices.length > 0;
+  const totalNew = devices.reduce((sum, device) => sum + (device.newEventCount || 0), 0);
+
+  // Computed at render rather than stored - it's derived from the clock
+  // and the device list, and both are already here.
+  const greeting = `${greetingFor(new Date().getHours())}, ${firstName(user?.name)}`;
+
+  let summary = null;
+  if (!loading && !error && hasDevices) {
+    summary =
+      totalNew > 0
+        ? `${totalNew} new ${totalNew === 1 ? 'event' : 'events'} since you last looked`
+        : `All quiet at your ${devices.length === 1 ? 'doorbell' : `${devices.length} doorbells`}`;
+  }
 
   return (
     <section>
+      <div className={styles.greeting}>
+        <h1 className={styles.greetingLine}>{greeting}</h1>
+        {summary && (
+          <p className={`${styles.greetingSub} ${totalNew > 0 ? styles.hasNew : ''}`}>{summary}</p>
+        )}
+      </div>
+
       <p className={styles.sectionLabel}>Your doorbells</p>
 
       {loading && <p className={styles.loading}>Loading…</p>}
@@ -50,6 +90,14 @@ export function Home() {
                 {device.role === 'member' && ' · Shared with you'}
               </span>
             </span>
+            {device.newEventCount > 0 && (
+              <span
+                className={styles.newBadge}
+                title={`${device.newEventCount} new since you last looked`}
+              >
+                {device.newEventCount > 99 ? '99+' : device.newEventCount}
+              </span>
+            )}
             <span className={styles.chevron} aria-hidden="true">
               ›
             </span>
