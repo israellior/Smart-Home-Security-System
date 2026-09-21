@@ -64,7 +64,7 @@ register/login.
 | GET    | `/auth/me`             (auth) | Current user                        |
 | GET    | `/devices`              (auth)| Devices you're a member of, each with your `role` |
 | POST   | `/devices`              (auth)| Create a device — you become its owner |
-| POST   | `/devices/join`         (auth)| `{ shareCode }` → join someone else's device as a member |
+| POST   | `/devices/join`         (auth)| `{ shareCode }` → join a device. **First joiner becomes its owner** |
 | GET    | `/devices/:id`          (auth)| One device (must be a member)       |
 | PATCH  | `/devices/:id`          (auth)| Update name/location/sensitivity (shared by all members) |
 | PATCH  | `/devices/:id/preferences` (auth) | Your own notification preferences for this device |
@@ -74,13 +74,15 @@ register/login.
 | DELETE | `/devices/:id/members/:userId` (auth) | Remove someone (owner) or leave (yourself) |
 | GET    | `/devices/:deviceId/events` (auth) | Events, newest first. `?limit=` (max 100) and `?before=<cursor>` |
 | POST   | `/devices/:deviceId/events` (auth) | Log an event: `{ type, meta, eventId?, at? }` → `{ event, outcome }` |
-| POST   | `/devices/:id/pairing-code` (auth) | **Owner only.** Mint a one-time pairing code for real hardware |
-| POST   | `/provision`                  | `{ pairingCode, deviceId }` → a device credential. **No auth** |
 | GET    | `/devices/:deviceId/self` (device) | What the Pi can see about itself. Device credential, not a JWT |
 
 Routes marked **(device)** authenticate with a *device credential*
 (`Authorization: Bearer pl_porch-1_…`), not a user JWT. The two are separate
 principals and neither is accepted where the other is expected.
+
+**Every route authenticates.** There is no enrolment endpoint and no
+unauthenticated route anywhere in the app — devices are provisioned offline,
+not over the wire.
 
 ### Sharing model
 
@@ -90,10 +92,15 @@ doorbell and one account hold several. A compound unique index on
 `{ device, user }` makes joining idempotent: a double-tapped button can't
 grant two memberships.
 
-- **owner** — created the device. Can rename, delete, and manage access.
+- **owner** — created the device in the app, or was the first to claim a
+  provisioned one with its share code. Can rename, delete, and manage access.
   Sees the `shareCode`.
-- **member** — joined with a share code. Can view and change settings.
-  Cannot delete the device, remove other people, or see the share code.
+- **member** — joined a doorbell that already had an owner. Can view and
+  change settings. Cannot delete the device, remove other people, or see the
+  share code.
+
+Exactly one owner per doorbell, enforced by a partial unique index rather than
+a check — see "Claiming" below for why that matters.
 
 The owner cannot leave a device (there'd be nobody left to manage it) — they
 delete it instead. Transferring ownership isn't built yet.
@@ -102,34 +109,78 @@ Share codes look like `PORCH-7K2M9P`, generated with `crypto.randomInt` over
 an alphabet that omits `0/O` and `1/I/L`, since these get read aloud. Input is
 normalized, so `porch 7k2m9p` and `7K2M9P` both work.
 
-## Hardware identity and pairing
+## Hardware identity and provisioning
 
-A `Device` document exists from the moment a user taps "add doorbell", with no
-hardware behind it. Pairing is what binds a real Raspberry Pi to one.
+**A doorbell is born with its credential and takes no part in deciding who
+owns it.** It is provisioned once, when the hardware is built, by an operator
+running a script. It never enrols over the network, never negotiates for a
+secret, and never waits for a person. It boots, authenticates, and starts
+reporting — whether or not anyone has claimed it yet.
 
-**Three secrets, three jobs.** They are easy to confuse and do not substitute
-for each other:
+That split is the whole design: **authentication** answers "is this a real
+doorbell", **ownership** answers "whose is it", and only the second involves a
+human. A doorbell that comes up at 3am reports motion at 3am.
+
+### Provisioning
+
+```
+node scripts/mint-device.mjs --device-id porch-1 --name "Front Door"
+
+  credential   pl_porch-1_xK3mQ9…      write this onto the Pi
+  share code   PORCH-7K2M9P            give this to whoever will own it
+```
+
+Two secrets, printed once each, with completely different jobs:
 
 | | grants | to whom | lifetime |
 |---|---|---|---|
-| **share code** `PORCH-7K2M9P` | access to a doorbell | another *person* | until revoked |
-| **pairing code** `PAIR-7K2M9P4Q` | the right to become this doorbell | one Pi, once | 10 minutes |
-| **credential** `pl_porch-1_…` | "I am porch-1", on every request | that Pi | until re-paired |
+| **credential** `pl_porch-1_…` | "I am porch-1", on every request | that Pi | until re-minted |
+| **share code** `PORCH-7K2M9P` | access to this doorbell | any *person* | until revoked |
 
-**The flow**, three steps with three different principals:
+`--force` re-mints: the new credential replaces the old one, which stops
+working the instant it saves. That is the recovery path for a lost credential
+and the revocation path for a Pi that walked off. There is deliberately **no
+rotate-over-the-network endpoint**, so this means re-flashing the card — a
+conscious trade of convenience for having no remote path to a device's
+identity.
 
-1. `POST /devices/:id/pairing-code` — owner only, returns the code **once**.
-2. `POST /provision` — the Pi redeems it for a credential, returned **once**.
-   The only unauthenticated endpoint in the app, and it has to be: a
-   factory-fresh Pi holds nothing. The code stands in for auth — single use,
-   ten-minute expiry, ~850 billion possibilities.
-3. `GET /devices/:deviceId/self` — proves the credential works.
+`--attach <id>` binds hardware to a doorbell that already exists in the app,
+rather than creating a new record. Its share code and members are untouched.
 
-**Secrets are stored hashed and shown once.** Only hashes are persisted, and
-the schema's `toJSON` strips them on every path out, the same way `User`
-strips `passwordHash`. A lost credential is **re-paired, never looked up** —
-which is also how you revoke a Pi that walked off, since re-pairing
-invalidates the previous credential the instant it saves.
+### Claiming: first joiner becomes the owner
+
+A minted device has **no owner at all**. The first person to submit its share
+code becomes `owner`; everyone after is a `member`.
+
+Two people submitting the same code in the same instant would both read "no
+owner yet" and both become owner, so this is enforced by a **partial unique
+index** on `{ device, role: 'owner' }` rather than by a check — the loser's
+insert fails and `joinDevice` retries them as a member. Same reasoning as the
+share code's own unique index: a uniqueness rule that matters is enforced by
+the database or it is not enforced at all. Verified with 8 simultaneous
+claims: one owner, seven members, nobody rejected.
+
+The trade-off worth knowing: whoever holds the share code first owns the
+doorbell, so a code that leaks before its intended owner uses it is a
+land-grab. That is the cost of having no separate claim code, and it closes
+the moment someone claims.
+
+### Events arrive before owners exist
+
+An unclaimed doorbell's alerts are stored normally. The notification fan-out
+finds zero members and returns early; nothing errors and nothing is lost. When
+someone finally claims it, `lastSeenAt` is `null` — meaning "never looked" —
+so the entire history counts as unread and they see everything that happened
+before they arrived.
+
+This is rule 4's order independence generalised to ownership, and it needed no
+code: the watermark already said the right thing.
+
+### Secrets are stored hashed and shown once
+
+Only hashes are persisted, and the schema's `toJSON` strips `credentialHash`
+on every path out, the same way `User` strips `passwordHash`. There is no
+endpoint that reads a credential back — not for the owner, not for the device.
 
 **SHA-256, not bcrypt**, for device secrets. bcrypt is slow to make guessing a
 *human-chosen* password expensive; a device credential is 32 bytes from the
@@ -144,16 +195,21 @@ against every device row — the same reason GitHub and Stripe keys are prefixed
 rather than opaque. Parsing scans left to right: base64url's alphabet includes
 `_`, so splitting from the right would cut the secret in half.
 
-**`paired` is not `connected`.** Paired means a Pi has claimed this doorbell
-and holds a credential. Connected means one is on the other end of a socket
-right now — which only the signaling layer can answer, so `connected` stays
-untouched here. `lastContactAt` is the honest thing this layer can say, and
-it's written at most once a minute per device rather than on every request.
+### Three states, and they are not the same question
 
-**`req.hardware`, not `req.device`.** `requireDeviceAccess` already puts a
-device on `req.device`, meaning "one this *user* may touch". The two
-middlewares authorize against different principals, and a handler reading the
-wrong one would be checking the wrong thing entirely.
+- **provisioned** — a Pi was built for this doorbell and holds a credential.
+- **claimed** — at least one person has an owner Membership for it.
+- **connected** — a Pi is on the other end of a socket *right now*.
+
+All three are independent. A doorbell can be provisioned, unclaimed and
+online, reporting alerts nobody is reading yet.
+
+### `req.hardware`, not `req.device`
+
+`requireDeviceAccess` already puts a device on `req.device`, meaning "one this
+*user* may touch". The two middlewares authorize against different principals,
+and a handler reading the wrong one would be checking the wrong thing
+entirely.
 
 ## Events: the device's contract
 
@@ -352,7 +408,7 @@ backend's job.
 That gap is mostly closed now. Devices have their own credentials and their
 own middleware (`middleware/deviceAuth.js`), and events carry the device-owned
 identity and the dedupe/upgrade rules the daemon expects — see "Hardware
-identity and pairing" and "Events: the device's contract" above.
+identity and provisioning" and "Events: the device's contract" above.
 
 The gap is closed. Real hardware connects to `/signal` with its own
 credential, reports events there, and is acknowledged per the contract — see
@@ -381,8 +437,9 @@ src/
   services/events/           - ingestEvent: the only way an event gets in
   services/notifications/    - fan-out to push and email, plus the log
   utils/shareCode.js         - person-to-person access codes
-  utils/deviceCredential.js  - pairing codes and device credentials
-scripts/                     - one-off migrations, all --dry-run capable
+  utils/deviceCredential.js  - device credentials: mint, parse, verify
+scripts/mint-device.mjs      - provision hardware; the only credential source
+scripts/migrate-*.mjs        - one-off migrations, all --dry-run capable
 ```
 
 ## Notes on choices made here

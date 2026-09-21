@@ -9,7 +9,7 @@ import cors from 'cors';
 import 'express-async-errors';
 import { authRoutes } from './routes/authRoutes.js';
 import { deviceRoutes } from './routes/deviceRoutes.js';
-import { provisioningRoutes, hardwareRoutes } from './routes/hardwareRoutes.js';
+import { hardwareRoutes } from './routes/hardwareRoutes.js';
 
 export function createApp() {
   const app = express();
@@ -27,7 +27,9 @@ export function createApp() {
   // handler ever ran. Mounting hardwareRoutes ahead of it lets the
   // device-authenticated paths match first; everything else falls
   // through untouched.
-  app.use('/api/provision', provisioningRoutes);
+  //
+  // Every route below authenticates. There is no enrolment endpoint,
+  // because devices are provisioned offline rather than over the wire.
   app.use('/api/devices', hardwareRoutes);
   app.use('/api/devices', deviceRoutes);
 

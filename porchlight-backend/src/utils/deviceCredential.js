@@ -1,20 +1,21 @@
-import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
 /**
- * Credentials and pairing codes for real hardware.
+ * Device credentials - the secret a Raspberry Pi is built with.
  *
- * Two different secrets with two different jobs, and they are easy to
- * confuse:
+ * A device is provisioned once, by an operator running
+ * scripts/mint-device.mjs, and the credential is written onto its SD card
+ * alongside the rest of its configuration. It never enrols over the
+ * network, never negotiates for a secret, and never takes part in
+ * deciding who owns it. It boots, authenticates, and starts reporting.
  *
- *   pairing code - short, human-typed, single use, expires in minutes.
- *                  Proves "the person holding this screen also has
- *                  physical access to this Pi".
- *   credential   - long, machine-held, long-lived. Proves "I am porch-1"
- *                  on every request the daemon ever makes.
+ * That separation is the point: authentication answers "is this a real
+ * doorbell", ownership answers "whose is it", and only the second one
+ * involves a person. A doorbell that comes up at 3am reports motion at
+ * 3am, whether or not anyone has claimed it yet.
  *
- * The share code in utils/shareCode.js is a third thing again: it grants
- * a *person* access to a doorbell. None of the three substitute for each
- * other.
+ * The share code in utils/shareCode.js is the other half - it grants a
+ * *person* access to a doorbell. The two never substitute for each other.
  */
 
 // A credential looks like:  pl_porch-1_<43 url-safe chars>
@@ -26,19 +27,6 @@ import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto
 // reason GitHub and Stripe keys are prefixed rather than opaque.
 const CREDENTIAL_PREFIX = 'pl';
 const SECRET_BYTES = 32;
-
-// Pairing codes are read off one screen and typed into another machine,
-// so they reuse the transcription-safe alphabet share codes use - no
-// 0/O, no 1/I/L.
-const PAIRING_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-const PAIRING_LENGTH = 8;
-const PAIRING_PREFIX = 'PAIR';
-
-// Long enough to walk to the doorbell and type it in, short enough that a
-// code left on a screen overnight is worthless. 31^8 is ~850 billion, so
-// the expiry is defence in depth rather than the only thing standing in
-// the way.
-export const PAIRING_TTL_MS = 10 * 60 * 1000;
 
 // Lowercase slug: it appears in URLs, in LiveKit room names, and inside
 // the credential itself, where an underscore would break parsing.
@@ -74,10 +62,11 @@ function sha256(value) {
 }
 
 /**
- * Mints a fresh credential for a device. Returns the plaintext once -
- * the caller is expected to hand it to the Pi and forget it, because
- * only the hash is ever stored. A credential that is lost is re-paired,
- * never looked up.
+ * Mints a credential. Returns the plaintext once - the caller writes it
+ * to the device and forgets it, because only the hash is stored. There is
+ * no endpoint that reads it back and no recovery path: a credential that
+ * is lost is re-minted and re-flashed, which is also how a doorbell that
+ * walked off is revoked.
  */
 export function generateDeviceCredential(deviceId) {
   const secret = randomBytes(SECRET_BYTES).toString('base64url');
@@ -130,43 +119,4 @@ export function secretMatchesHash(secret, storedHash) {
   const stored = Buffer.from(String(storedHash), 'utf8');
   if (presented.length !== stored.length) return false;
   return timingSafeEqual(presented, stored);
-}
-
-/**
- * A one-time code the owner reads off the app and types into the Pi.
- * randomInt rather than Math.random for the same reason share codes use
- * it: this is a credential, and Math.random is seeded predictably.
- */
-export function generatePairingCode() {
-  let body = '';
-  for (let i = 0; i < PAIRING_LENGTH; i++) {
-    body += PAIRING_ALPHABET[randomInt(PAIRING_ALPHABET.length)];
-  }
-  const code = `${PAIRING_PREFIX}-${body}`;
-  return {
-    code,
-    codeHash: hashPairingCode(code),
-    expiresAt: new Date(Date.now() + PAIRING_TTL_MS)
-  };
-}
-
-/** Accepts what a human types - "pair 7k2m9p4q", "PAIR-7K2M9P4Q", spaces. */
-export function normalizePairingCode(input) {
-  const cleaned = String(input ?? '')
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, '');
-
-  const body = cleaned.startsWith(PAIRING_PREFIX) ? cleaned.slice(PAIRING_PREFIX.length) : cleaned;
-  return body ? `${PAIRING_PREFIX}-${body}` : '';
-}
-
-/**
- * Pairing codes are looked up *by* their hash - the server has no idea
- * which device a presented code belongs to until it finds it. So unlike
- * the credential, this hash has to be deterministic and indexable, which
- * is another reason bcrypt (salted, so unindexable) is the wrong tool
- * here.
- */
-export function hashPairingCode(code) {
-  return sha256(code);
 }

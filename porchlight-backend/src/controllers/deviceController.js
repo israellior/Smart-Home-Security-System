@@ -35,11 +35,12 @@ function deviceForMember(device, membership) {
 
   // Derived rather than stored, because the stored form is a secret the
   // schema strips on the way out. "Is there hardware behind this?" is a
-  // question the UI genuinely needs answered and cannot currently ask:
-  // `paired` is not `connected`. Paired means a Pi has claimed this
-  // doorbell and holds a credential; connected means one is on the other
-  // end of a socket right now. A doorbell can be paired and unplugged.
-  json.paired = Boolean(device.credentialHash);
+  // question the UI genuinely needs answered and cannot otherwise ask:
+  // `provisioned` is not `connected`. Provisioned means a Pi was built
+  // for this doorbell and holds a credential; connected means one is on
+  // the other end of a socket right now. A doorbell can be provisioned
+  // and unplugged.
+  json.provisioned = Boolean(device.credentialHash);
 
   return json;
 }
@@ -145,10 +146,15 @@ export async function createDevice(req, res) {
 }
 
 /**
- * Join an existing doorbell with its share code. Idempotent on purpose:
- * a double-tapped button or a retried request re-reports the membership
- * the caller already has instead of erroring, and the unique index on
- * { device, user } catches the genuinely concurrent case.
+ * Join a doorbell with its share code, and claim it if nobody has.
+ *
+ * Hardware is provisioned with no owner - a doorbell boots and reports
+ * before any account exists for it - so the first person to submit its
+ * share code becomes the owner and everyone after is a member. That is
+ * the whole claiming story: the device never takes part in it.
+ *
+ * Idempotent on purpose: a double-tapped button or a retried request
+ * re-reports the membership the caller already has instead of erroring.
  */
 export async function joinDevice(req, res) {
   const shareCode = normalizeShareCode(req.body?.shareCode);
@@ -166,18 +172,37 @@ export async function joinDevice(req, res) {
     return res.json({ device: deviceForMember(device, existing), alreadyMember: true });
   }
 
+  const unclaimed = !(await Membership.exists({ device: device._id, role: 'owner' }));
+
   let membership;
   try {
-    membership = await Membership.create({ device: device._id, user: req.userId, role: 'member' });
+    membership = await Membership.create({
+      device: device._id,
+      user: req.userId,
+      role: unclaimed ? 'owner' : 'member'
+    });
   } catch (err) {
-    // Two joins landed at once; the index rejected the loser. The caller
-    // is a member either way, so this is a success, not a failure - read
-    // back the winner's membership so the response carries real prefs.
-    if (err.code === 11000) {
-      const won = await Membership.findOne({ device: device._id, user: req.userId });
+    if (err.code !== 11000) throw err;
+
+    // Two possible collisions, and they need different answers.
+    //
+    // On { device, user }: the same person joined twice at once. They are
+    // a member either way, so read back the winner's membership - the
+    // response has to carry their real preferences.
+    const won = await Membership.findOne({ device: device._id, user: req.userId });
+    if (won) {
       return res.json({ device: deviceForMember(device, won), alreadyMember: true });
     }
-    throw err;
+
+    // On { device, role: 'owner' }: two people claimed an unowned
+    // doorbell in the same instant and this one lost. Losing the claim is
+    // not losing access - retry as a member, which is what they would
+    // have got a millisecond later anyway.
+    membership = await Membership.create({
+      device: device._id,
+      user: req.userId,
+      role: 'member'
+    });
   }
 
   return res.status(201).json({ device: deviceForMember(device, membership) });

@@ -44,6 +44,27 @@ const membershipSchema = new mongoose.Schema(
 // silently granting a second membership.
 membershipSchema.index({ device: 1, user: 1 }, { unique: true });
 
+/**
+ * At most one owner per doorbell, enforced rather than checked.
+ *
+ * A device is provisioned with no owner at all - hardware ships, boots
+ * and reports before anyone has claimed it - and the first person to
+ * submit its share code becomes the owner. "Is there an owner yet?"
+ * followed by "then make me one" is two operations, and two people
+ * submitting the same code in the same moment both read "no" and both
+ * become owner.
+ *
+ * A partial unique index closes that: the second insert fails on the
+ * index and joinDevice retries as a member. Same reasoning as the
+ * compound index above, and the same reasoning the share code itself
+ * uses - a uniqueness rule that matters is enforced by the database or
+ * it is not enforced at all.
+ */
+membershipSchema.index(
+  { device: 1, role: 1 },
+  { unique: true, partialFilterExpression: { role: 'owner' } }
+);
+
 // Notification dispatch queries { device, <pref>: true }. That is served
 // by the { device, user } index above on its leading field, and the
 // number of members per doorbell is small, so the scan after the seek is
