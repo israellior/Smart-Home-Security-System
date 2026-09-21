@@ -74,6 +74,13 @@ register/login.
 | DELETE | `/devices/:id/members/:userId` (auth) | Remove someone (owner) or leave (yourself) |
 | GET    | `/devices/:deviceId/events` (auth) | Events, newest first. `?limit=` (max 100) and `?before=<cursor>` |
 | POST   | `/devices/:deviceId/events` (auth) | Log an event: `{ type: "motion" \| "ring", meta }` |
+| POST   | `/devices/:id/pairing-code` (auth) | **Owner only.** Mint a one-time pairing code for real hardware |
+| POST   | `/provision`                  | `{ pairingCode, deviceId }` → a device credential. **No auth** |
+| GET    | `/devices/:deviceId/self` (device) | What the Pi can see about itself. Device credential, not a JWT |
+
+Routes marked **(device)** authenticate with a *device credential*
+(`Authorization: Bearer pl_porch-1_…`), not a user JWT. The two are separate
+principals and neither is accepted where the other is expected.
 
 ### Sharing model
 
@@ -94,6 +101,59 @@ delete it instead. Transferring ownership isn't built yet.
 Share codes look like `PORCH-7K2M9P`, generated with `crypto.randomInt` over
 an alphabet that omits `0/O` and `1/I/L`, since these get read aloud. Input is
 normalized, so `porch 7k2m9p` and `7K2M9P` both work.
+
+## Hardware identity and pairing
+
+A `Device` document exists from the moment a user taps "add doorbell", with no
+hardware behind it. Pairing is what binds a real Raspberry Pi to one.
+
+**Three secrets, three jobs.** They are easy to confuse and do not substitute
+for each other:
+
+| | grants | to whom | lifetime |
+|---|---|---|---|
+| **share code** `PORCH-7K2M9P` | access to a doorbell | another *person* | until revoked |
+| **pairing code** `PAIR-7K2M9P4Q` | the right to become this doorbell | one Pi, once | 10 minutes |
+| **credential** `pl_porch-1_…` | "I am porch-1", on every request | that Pi | until re-paired |
+
+**The flow**, three steps with three different principals:
+
+1. `POST /devices/:id/pairing-code` — owner only, returns the code **once**.
+2. `POST /provision` — the Pi redeems it for a credential, returned **once**.
+   The only unauthenticated endpoint in the app, and it has to be: a
+   factory-fresh Pi holds nothing. The code stands in for auth — single use,
+   ten-minute expiry, ~850 billion possibilities.
+3. `GET /devices/:deviceId/self` — proves the credential works.
+
+**Secrets are stored hashed and shown once.** Only hashes are persisted, and
+the schema's `toJSON` strips them on every path out, the same way `User`
+strips `passwordHash`. A lost credential is **re-paired, never looked up** —
+which is also how you revoke a Pi that walked off, since re-pairing
+invalidates the previous credential the instant it saves.
+
+**SHA-256, not bcrypt**, for device secrets. bcrypt is slow to make guessing a
+*human-chosen* password expensive; a device credential is 32 bytes from the
+CSPRNG, where there is no dictionary and stretching buys nothing. The slowness
+would cost ~100ms on every media-token mint, clip upload and socket reconnect
+in the fleet. Passwords keep bcryptjs — the rule is about the secret's
+entropy, not the collection.
+
+**The deviceId rides inside the credential** (`pl_<deviceId>_<secret>`), so
+authenticating is one indexed lookup plus one hash rather than a comparison
+against every device row — the same reason GitHub and Stripe keys are prefixed
+rather than opaque. Parsing scans left to right: base64url's alphabet includes
+`_`, so splitting from the right would cut the secret in half.
+
+**`paired` is not `connected`.** Paired means a Pi has claimed this doorbell
+and holds a credential. Connected means one is on the other end of a socket
+right now — which only the signaling layer can answer, so `connected` stays
+untouched here. `lastContactAt` is the honest thing this layer can say, and
+it's written at most once a minute per device rather than on every request.
+
+**`req.hardware`, not `req.device`.** `requireDeviceAccess` already puts a
+device on `req.device`, meaning "one this *user* may touch". The two
+middlewares authorize against different principals, and a handler reading the
+wrong one would be checking the wrong thing entirely.
 
 ## Notifications
 
@@ -151,24 +211,35 @@ stays simple C/V4L2 code, and "what happens with a detected event"
 (storing it, notifying a user, showing it in the app) is entirely the
 backend's job.
 
-One real-world gap worth being upfront about: this endpoint currently
-requires a *user's* JWT, which a standalone device obviously doesn't
-have. A production version would give each device its own long-lived
-API key (a separate field on the `Device` model, checked with its own
-lightweight middleware) rather than reusing user auth - that's a
-natural "next thing to build" if you want to extend this further.
+That gap is now half closed. Devices **do** have their own credentials and
+their own middleware (`middleware/deviceAuth.js`) — see "Hardware identity and
+pairing" above. What has not moved yet is this endpoint: `POST
+/devices/:deviceId/events` still requires a *user's* JWT.
+
+It stays that way deliberately until the event schema changes, because the
+real device path is not an HTTP POST at all. `docs/server-brief.md` in the
+device repo specifies alerts arriving on a signaling WebSocket, carrying a
+device-supplied `eventId`, a sensor-fire `at` distinct from receipt time, and
+dedupe on `(eventId, kind)` with `motion` → `ring` as an upgrade. That needs a
+schema migration and a single shared ingest path used by both transports — two
+implementations of the upgrade rule is how a ring silently becomes a motion.
+Its own commit, with its own script alongside `scripts/`.
 
 ## Project structure
 
 ```
-server.js                    - entry point: connect to Mongo, start Express
+server.js                    - entry point: connect, build indexes, start Express
 src/
   app.js                     - Express app: middleware, routes, error handler
-  config/db.js               - Mongoose connection
-  models/                    - User, Device, Event schemas
-  middleware/auth.js         - JWT verification (requireAuth)
+  config/db.js               - Mongoose connection + ensureIndexes
+  models/                    - User, Device, Event, Membership, ... schemas
+  middleware/auth.js         - JWT verification (requireAuth)      -> a user
+  middleware/deviceAuth.js   - device credentials (requireDevice)  -> a Pi
+  middleware/deviceAccess.js - "may this user touch this device?"
   controllers/               - request handlers, one file per resource
   routes/                    - route tables, wired to controllers
+  utils/shareCode.js         - person-to-person access codes
+  utils/deviceCredential.js  - pairing codes and device credentials
 ```
 
 ## Notes on choices made here
@@ -209,3 +280,20 @@ src/
   TLS handshake to this Atlas cluster fails intermittently with a
   server-side alert (not credentials, not the IP allowlist). Without a
   retry, `npm run dev` fails to start a good fraction of the time.
+- **Indexes are awaited before the port opens** (`ensureIndexes`). Mongoose
+  builds indexes on its own, but in the background at model-compile time, and
+  it reports failures on an `'index'` event nothing listens to. So a fresh
+  process serves requests during the window before its unique indexes exist -
+  and every unique index here enforces a rule with no other enforcement: one
+  doorbell per `deviceId`, one membership per `(device, user)`, one share code
+  in the world. This was not theoretical. An end-to-end run had two doorbells
+  successfully provision under the same `deviceId`, and the damage outlives
+  the window: the duplicate rows persist, and the unique index can then never
+  finish building. Every check had passed.
+- **Index builds run one model at a time, each retried.** Against this cluster
+  a single failed handshake clears the whole connection pool, failing every
+  operation in flight - so a `Promise.all` over six models turns one unlucky
+  handshake into six failures, and retrying the batch re-rolls all six
+  together. Five consecutive attempts failed that way before it was
+  serialised. Sequentially a failure costs one model one retry. They are
+  no-ops once the indexes exist, so it costs nothing worth measuring.

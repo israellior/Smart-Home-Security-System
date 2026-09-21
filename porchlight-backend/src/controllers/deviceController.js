@@ -33,6 +33,14 @@ function deviceForMember(device, membership) {
   json.role = membership.role;
   json.lastSeenAt = membership.lastSeenAt;
 
+  // Derived rather than stored, because the stored form is a secret the
+  // schema strips on the way out. "Is there hardware behind this?" is a
+  // question the UI genuinely needs answered and cannot currently ask:
+  // `paired` is not `connected`. Paired means a Pi has claimed this
+  // doorbell and holds a credential; connected means one is on the other
+  // end of a socket right now. A doorbell can be paired and unplugged.
+  json.paired = Boolean(device.credentialHash);
+
   return json;
 }
 

@@ -12,6 +12,7 @@ import {
   removeMember
 } from '../controllers/deviceController.js';
 import { listEvents, createEvent } from '../controllers/eventController.js';
+import { createPairingCode } from '../controllers/provisioningController.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireDeviceAccess, requireDeviceOwner } from '../middleware/deviceAccess.js';
 
@@ -44,3 +45,8 @@ deviceRoutes.delete('/:id/members/:userId', requireDeviceAccess, removeMember);
 
 deviceRoutes.get('/:deviceId/events', requireDeviceAccess, listEvents);
 deviceRoutes.post('/:deviceId/events', requireDeviceAccess, createEvent);
+
+// Owner-only: handing out a pairing code is handing out the ability to
+// become this doorbell, which is a bigger grant than the share code's
+// "come and look at it". Same reasoning as delete.
+deviceRoutes.post('/:id/pairing-code', requireDeviceAccess, requireDeviceOwner, createPairingCode);

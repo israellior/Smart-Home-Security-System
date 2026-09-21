@@ -9,6 +9,7 @@ import cors from 'cors';
 import 'express-async-errors';
 import { authRoutes } from './routes/authRoutes.js';
 import { deviceRoutes } from './routes/deviceRoutes.js';
+import { provisioningRoutes, hardwareRoutes } from './routes/hardwareRoutes.js';
 
 export function createApp() {
   const app = express();
@@ -19,6 +20,15 @@ export function createApp() {
   app.get('/api/health', (req, res) => res.json({ ok: true }));
 
   app.use('/api/auth', authRoutes);
+
+  // Hardware first. deviceRoutes applies requireAuth to everything it
+  // holds, so anything reaching it must carry a *user* token - a Pi
+  // presenting a device credential there would be rejected before its
+  // handler ever ran. Mounting hardwareRoutes ahead of it lets the
+  // device-authenticated paths match first; everything else falls
+  // through untouched.
+  app.use('/api/provision', provisioningRoutes);
+  app.use('/api/devices', hardwareRoutes);
   app.use('/api/devices', deviceRoutes);
 
   app.use((req, res) => {
