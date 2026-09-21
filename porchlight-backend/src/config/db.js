@@ -3,6 +3,27 @@ import mongoose from 'mongoose';
 const MAX_ATTEMPTS = 5;
 const RETRY_DELAY_MS = 1500;
 
+// The driver defaults to 100 connections and opens them on demand, so a
+// burst of concurrent requests triggers a burst of TLS handshakes. On
+// this cluster a handshake fails often enough that "several at once"
+// means "at least one fails", and one failure clears the entire pool and
+// takes down every operation in flight with it - a doorbell flushing an
+// hour of backlog saw 86 of 90 requests fail this way.
+//
+// Bounding the pool reduces this measurably but does not cure it - the
+// same burst went from 12 failures out of 12 to 4 out of 12. The cure is
+// a cluster whose handshakes work; this is damage control, and it is
+// also just correct sizing. Ten concurrent operations is more than this
+// workload needs, the driver queues the rest rather than dropping them,
+// and fewer handshakes means proportionally fewer chances to trip the
+// cascade. Raising this is not how you serve more traffic - it is how
+// you open more sockets to fail.
+//
+// What makes the remaining failures survivable is the contract rather
+// than the pool: a transient failure produces no acknowledgement, and an
+// unacknowledged alert is one the device sends again.
+const MAX_POOL_SIZE = 10;
+
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
@@ -50,7 +71,7 @@ export async function connectDB() {
   // failure, so starting the API becomes a coin flip. Once a connection
   // is established the driver's own pool handles later drops; this only
   // covers getting off the ground.
-  await withRetry('MongoDB connect', () => mongoose.connect(uri));
+  await withRetry('MongoDB connect', () => mongoose.connect(uri, { maxPoolSize: MAX_POOL_SIZE }));
 }
 
 /**

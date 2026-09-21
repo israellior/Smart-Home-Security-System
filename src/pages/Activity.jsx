@@ -19,6 +19,18 @@ const EVENT_TITLES = {
   ring: 'Someone rang the bell'
 };
 
+// A row shows when the sensor fired, so an alert the doorbell queued
+// through an outage appears at the time it happened - correct, but it
+// would otherwise look like we simply knew about it all along. Past this
+// gap between firing and arriving, the row says so.
+//
+// A minute of slack, because ordinary delivery is seconds and a clock
+// that drifts slightly shouldn't label every event delayed.
+const DELAYED_AFTER_MS = 60 * 1000;
+
+const wasDelayed = (event) =>
+  event.at && event.receivedAt && new Date(event.receivedAt) - new Date(event.at) > DELAYED_AFTER_MS;
+
 export function Activity() {
   const { token } = useAuth();
   const { markSeen } = useDevices();
@@ -72,16 +84,28 @@ export function Activity() {
 
   const hasRealEvents = events.length > 0;
 
-  // Split against the frozen watermark. A null watermark means this list
-  // has never been opened, so everything counts as new.
-  const isNew = (event) => !seenAtOnOpen || new Date(event.createdAt) > new Date(seenAtOnOpen);
+  // Split against the frozen watermark, comparing arrival time rather
+  // than sensor time. An alert the doorbell held through an outage
+  // carries an old `at` but only reached the server just now - judging it
+  // by `at` would file it as already-seen and hide it under "Earlier",
+  // which is precisely the event you most wanted to be told about.
+  const isNew = (event) => !seenAtOnOpen || new Date(event.receivedAt) > new Date(seenAtOnOpen);
   const newEvents = events.filter(isNew);
   const earlierEvents = events.filter((event) => !isNew(event));
 
   const renderRow = (event, markNew) => (
     <div className={`${styles.eventRow} ${markNew ? styles.isNew : ''}`} key={event._id}>
-      <span className={styles.eventTitle}>{EVENT_TITLES[event.type] || event.type}</span>
-      <span className={styles.eventTime}>{new Date(event.createdAt).toLocaleString()}</span>
+      <span className={styles.eventTitle}>
+        {EVENT_TITLES[event.type] || event.type}
+        {wasDelayed(event) && (
+          <span className={styles.delayedTag} title="The doorbell couldn't reach us at the time">
+            delayed
+          </span>
+        )}
+      </span>
+      {/* Sensor time, not arrival time: this says when someone was at the
+          door, which is the question the list is actually answering. */}
+      <span className={styles.eventTime}>{new Date(event.at).toLocaleString()}</span>
     </div>
   );
 

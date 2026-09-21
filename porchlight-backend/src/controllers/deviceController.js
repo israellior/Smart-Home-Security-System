@@ -50,7 +50,14 @@ function deviceForMember(device, membership) {
  * Every device has its own watermark, so the naive shape is one count
  * query per device - an N+1 that grows with someone's device list. This
  * folds them into a single aggregation: one $or branch per device, each
- * an indexed range seek on { device, createdAt }, grouped by device.
+ * an indexed range seek on { device, receivedAt }, grouped by device.
+ *
+ * Counted against `receivedAt`, not `at`. The activity list is ordered by
+ * `at` - when the sensor fired - but "new since you last looked" has to
+ * mean "arrived since you last looked", and those differ exactly when it
+ * matters most: an alert queued through an outage carries an old `at`,
+ * so counting by `at` would file yesterday's doorbell press below today's
+ * watermark and mark it read before anyone saw it.
  */
 async function newEventCountsByDevice(memberships) {
   const branches = memberships
@@ -58,7 +65,7 @@ async function newEventCountsByDevice(memberships) {
     .map((m) => ({
       device: m.device._id,
       // Never looked means everything counts as new.
-      createdAt: { $gt: m.lastSeenAt || new Date(0) }
+      receivedAt: { $gt: m.lastSeenAt || new Date(0) }
     }));
 
   if (branches.length === 0) return new Map();

@@ -73,7 +73,7 @@ register/login.
 | GET    | `/devices/:id/members`  (auth)| Who has access, and in what role    |
 | DELETE | `/devices/:id/members/:userId` (auth) | Remove someone (owner) or leave (yourself) |
 | GET    | `/devices/:deviceId/events` (auth) | Events, newest first. `?limit=` (max 100) and `?before=<cursor>` |
-| POST   | `/devices/:deviceId/events` (auth) | Log an event: `{ type: "motion" \| "ring", meta }` |
+| POST   | `/devices/:deviceId/events` (auth) | Log an event: `{ type, meta, eventId?, at? }` → `{ event, outcome }` |
 | POST   | `/devices/:id/pairing-code` (auth) | **Owner only.** Mint a one-time pairing code for real hardware |
 | POST   | `/provision`                  | `{ pairingCode, deviceId }` → a device credential. **No auth** |
 | GET    | `/devices/:deviceId/self` (device) | What the Pi can see about itself. Device credential, not a JWT |
@@ -155,6 +155,59 @@ device on `req.device`, meaning "one this *user* may touch". The two
 middlewares authorize against different principals, and a handler reading the
 wrong one would be checking the wrong thing entirely.
 
+## Events: the device's contract
+
+An event's identity belongs to the device, not to us. `porchlightd` mints an
+`eventId` when the sensor fires and **resends that alert until it is
+acknowledged**, so retries are the normal case rather than the exception. Four
+rules follow from that, and all four live in exactly one place —
+`services/events/ingestEvent.js`. Both the HTTP endpoint and (next) the
+signaling socket call it, because two implementations of the upgrade rule is
+how a ring silently becomes a motion on whichever path got it wrong.
+
+**1. Dedupe on `(device, eventId)`.** Enforced by a unique index, not by a
+check — a check loses the race it exists to prevent. Verified: 90 concurrent
+posts of 30 distinct events produced exactly 30 rows and 60 duplicates.
+
+**2. `motion` → `ring` is an upgrade; `ring` → `motion` is ignored.** Written
+as a maximum, never a sequence, because after an outage the two can arrive in
+either order. The kind is stored as `kindRank` (0/1) so the upgrade is an
+atomic compare-and-set on a number; `type` is a virtual derived from it, so
+there is no second copy to drift. `$max` on the *string* appears to work —
+`"ring" > "motion"` — which is a coincidence that survives exactly until
+someone adds a third kind.
+
+**3. A rejection is permanent; a transient failure is not.** `ok: false` makes
+the device **drop that alert forever**, so it is only ever returned for things
+that will still be wrong next time: an unknown kind, a malformed timestamp.
+Anything transient — a database blip, a deploy — must produce *no answer at
+all*, because a missing acknowledgement is the retryable case. `ingestEvent`
+encodes this in its signature: permanent problems are **returned** as
+`REJECTED`, transient ones are **thrown**.
+
+**4. Order independence.** Nothing requires anything else to have arrived
+first. `at` is applied with `$min`, so whichever of the motion and the ring
+lands first, the event keeps the earliest sensor time.
+
+### Two timestamps, and why neither is optional
+
+| | means | used for |
+|---|---|---|
+| `at` | when the sensor fired | display, ordering, cursor paging |
+| `receivedAt` | when we last learned something new | unread counts |
+
+They differ exactly when it matters most. An alert a doorbell held through a
+ten-minute outage carries an *old* `at` — so the activity list shows it at the
+time someone was actually at the door, which is right. But counting unread by
+`at` would file it below the watermark and mark it read **before anyone saw
+it**. Counting by `receivedAt` is what stops the one alert you most wanted
+from being the one that goes unnoticed. The UI tags such a row `delayed`, so a
+backfilled event isn't quietly buried in yesterday.
+
+`outcome` on the response is `created` | `upgraded` | `duplicate`, and 201
+only for `created` — telling a device replaying an hour of backlog that it
+"created" something several hundred times would be a lie.
+
 ## Notifications
 
 Two different things, deliberately kept apart:
@@ -178,10 +231,16 @@ aggregation rather than one count query per device.
 **Dispatch** (`src/services/notifications/`) costs a fixed three queries no
 matter how many members a device has: memberships with the preference on,
 all their push subscriptions in one `$in`, then one `insertMany` for the
-delivery log. `createEvent` responds `201` *before* dispatching — recording
-that motion happened is the job that matters, and telling people is
-best-effort on top. That call site is where a job queue slots in at real
-volume, without callers changing.
+delivery log. It is never awaited — recording that motion happened is the job
+that matters, and telling people is best-effort on top. That call site is
+where a job queue slots in at real volume, without callers changing.
+
+**It fires on `created` and `upgraded`, never on `duplicate`.** That rule
+lives inside `ingestEvent` rather than at each call site, because it is part
+of the dedupe rule and not a thing each transport should be trusted to
+remember. Both halves matter: a doorbell flushing an hour of retries must not
+re-notify anyone, and a ring arriving after its motion **must**, because it is
+new information with its own per-person preference.
 
 **Channels** (`src/services/notifications/channels/`) are `webPush` and
 `email`. Both are **stubs**: they resolve recipients, honour preferences, and
@@ -196,9 +255,9 @@ TTL index prunes them after 30 days with no cron job.
 
 **Events are paged by cursor**, never `skip`/`limit`. `.skip(n)` makes Mongo
 walk and discard n documents, so page 1000 costs a thousand times page 1. The
-cursor encodes `createdAt` *and* `_id`, because a motion detector firing
-several frames in one second produces events sharing a timestamp, and
-`createdAt` alone would skip or repeat them.
+cursor encodes `at` *and* `_id`, because a motion detector firing several
+frames in one second produces events sharing a timestamp, and `at` alone would
+skip or repeat them.
 
 ## Where this connects to the embedded (C/V4L2) side of the project
 
@@ -211,19 +270,17 @@ stays simple C/V4L2 code, and "what happens with a detected event"
 (storing it, notifying a user, showing it in the app) is entirely the
 backend's job.
 
-That gap is now half closed. Devices **do** have their own credentials and
-their own middleware (`middleware/deviceAuth.js`) — see "Hardware identity and
-pairing" above. What has not moved yet is this endpoint: `POST
-/devices/:deviceId/events` still requires a *user's* JWT.
+That gap is mostly closed now. Devices have their own credentials and their
+own middleware (`middleware/deviceAuth.js`), and events carry the device-owned
+identity and the dedupe/upgrade rules the daemon expects — see "Hardware
+identity and pairing" and "Events: the device's contract" above.
 
-It stays that way deliberately until the event schema changes, because the
-real device path is not an HTTP POST at all. `docs/server-brief.md` in the
-device repo specifies alerts arriving on a signaling WebSocket, carrying a
-device-supplied `eventId`, a sensor-fire `at` distinct from receipt time, and
-dedupe on `(eventId, kind)` with `motion` → `ring` as an upgrade. That needs a
-schema migration and a single shared ingest path used by both transports — two
-implementations of the upgrade rule is how a ring silently becomes a motion.
-Its own commit, with its own script alongside `scripts/`.
+What remains is the transport. `POST /devices/:deviceId/events` still requires
+a *user's* JWT, because the real device path is not an HTTP POST at all:
+`docs/server-brief.md` in the device repo specifies alerts arriving on a
+signaling WebSocket and being acknowledged there. The ingest path those alerts
+will use already exists and is already exercised — the socket is the next
+piece, and it adds a transport rather than changing a rule.
 
 ## Project structure
 
@@ -238,8 +295,11 @@ src/
   middleware/deviceAccess.js - "may this user touch this device?"
   controllers/               - request handlers, one file per resource
   routes/                    - route tables, wired to controllers
+  services/events/           - ingestEvent: the only way an event gets in
+  services/notifications/    - fan-out to push and email, plus the log
   utils/shareCode.js         - person-to-person access codes
   utils/deviceCredential.js  - pairing codes and device credentials
+scripts/                     - one-off migrations, all --dry-run capable
 ```
 
 ## Notes on choices made here
@@ -290,6 +350,15 @@ src/
   successfully provision under the same `deviceId`, and the damage outlives
   the window: the duplicate rows persist, and the unique index can then never
   finish building. Every check had passed.
+- **`maxPoolSize` is capped at 10.** The driver defaults to 100 and opens
+  connections on demand, so a burst of concurrent requests means a burst of
+  TLS handshakes — and on this cluster one failing handshake clears the whole
+  pool and kills every operation in flight. A simulated doorbell flushing an
+  hour of backlog saw 86 of 90 requests fail that way. Capping the pool cut it
+  to a fraction; it is damage control, not a cure, and it is also just correct
+  sizing. Raising this number is not how you serve more traffic, it is how you
+  open more sockets to fail. What makes the rest survivable is the contract:
+  no acknowledgement means the device sends it again.
 - **Index builds run one model at a time, each retried.** Against this cluster
   a single failed handshake clears the whole connection pool, failing every
   operation in flight - so a `Promise.all` over six models turns one unlucky

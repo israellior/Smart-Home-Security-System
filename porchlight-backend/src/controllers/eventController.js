@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { Event } from '../models/Event.js';
-import { dispatchEventNotifications } from '../services/notifications/index.js';
+import { ingestEvent, CREATED, REJECTED } from '../services/events/ingestEvent.js';
 
 // Both handlers run behind requireDeviceAccess, so req.device is already
 // loaded and already confirmed to belong to this caller. That's why the
@@ -10,20 +11,25 @@ import { dispatchEventNotifications } from '../services/notifications/index.js';
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
 
-// A cursor pins an exact position in the { createdAt desc, _id desc }
-// ordering. Both halves are needed: createdAt alone would skip or repeat
-// events sharing a timestamp, which is exactly what happens when a
-// motion detector fires several frames in the same second.
+// A cursor pins an exact position in the { at desc, _id desc } ordering.
+// Both halves are needed: `at` alone would skip or repeat events sharing
+// a timestamp, which is exactly what happens when a motion detector fires
+// several frames in the same second.
+//
+// Ordered by `at` - sensor time - rather than by arrival, so the list
+// reads as the day actually happened. An alert backfilled after an outage
+// slots into the evening it belongs to instead of appearing at the top
+// pretending to be recent.
 function encodeCursor(event) {
-  return Buffer.from(`${event.createdAt.toISOString()}|${event._id}`).toString('base64url');
+  return Buffer.from(`${event.at.toISOString()}|${event._id}`).toString('base64url');
 }
 
 function decodeCursor(cursor) {
   try {
     const [iso, id] = Buffer.from(cursor, 'base64url').toString('utf8').split('|');
-    const createdAt = new Date(iso);
-    if (Number.isNaN(createdAt.getTime()) || !id) return null;
-    return { createdAt, id };
+    const at = new Date(iso);
+    if (Number.isNaN(at.getTime()) || !id) return null;
+    return { at, id };
   } catch (err) {
     return null;
   }
@@ -48,16 +54,13 @@ export async function listEvents(req, res) {
     if (!cursor) return res.status(400).json({ error: 'Invalid cursor' });
     // Strictly "older than the cursor": earlier timestamp, or the same
     // timestamp with a lower id.
-    query.$or = [
-      { createdAt: { $lt: cursor.createdAt } },
-      { createdAt: cursor.createdAt, _id: { $lt: cursor.id } }
-    ];
+    query.$or = [{ at: { $lt: cursor.at } }, { at: cursor.at, _id: { $lt: cursor.id } }];
   }
 
   // One extra row tells us whether another page exists without a second
   // countDocuments over the whole collection.
   const events = await Event.find(query)
-    .sort({ createdAt: -1, _id: -1 })
+    .sort({ at: -1, _id: -1 })
     .limit(limit + 1);
 
   const hasMore = events.length > limit;
@@ -69,27 +72,40 @@ export async function listEvents(req, res) {
   });
 }
 
+/**
+ * The HTTP way in. Still behind a *user's* token, so this is the app's
+ * path and the one tests use - a real doorbell will arrive on the
+ * signaling socket instead. Both call the same ingestEvent, which is
+ * where the dedupe and upgrade rules live.
+ *
+ * `eventId` and `at` are accepted but optional here, because a person
+ * tapping a button in the app has neither. Generating them keeps every
+ * row shaped the same, so the dedupe rule needs no special case for
+ * app-raised events.
+ */
 export async function createEvent(req, res) {
-  const { type, meta } = req.body;
+  const { type, meta, eventId, at } = req.body;
 
-  if (!['motion', 'ring'].includes(type)) {
-    return res.status(400).json({ error: 'type must be "motion" or "ring"' });
+  // `??`, not `||`. Absent means "the caller has none, make one up";
+  // present-but-empty means the caller tried to supply one and got it
+  // wrong, which should be told rather than silently papered over with a
+  // random id that then dedupes against nothing.
+  const result = await ingestEvent({
+    device: req.device,
+    eventId: eventId ?? randomUUID(),
+    kind: type,
+    at: at ?? new Date(),
+    meta
+  });
+
+  if (result.outcome === REJECTED) {
+    return res.status(400).json({ error: result.reason });
   }
 
-  const event = await Event.create({ device: req.device._id, type, meta: meta || {} });
-
-  // Acknowledge first, then notify. A doorbell must get its 201 even if
-  // a push service is timing out - recording that motion happened is the
-  // job that matters, and telling people is best-effort on top of it.
-  res.status(201).json({ event });
-
-  // Nothing awaits this, so it must swallow its own errors: the response
-  // is already sent and a rejection here would otherwise be unhandled.
-  //
-  // This is the seam where a job queue belongs at real volume - push the
-  // event id onto a queue and let workers fan out, so a slow provider
-  // can't build up in-process work. Callers wouldn't change.
-  dispatchEventNotifications(req.device, event).catch((err) => {
-    console.error(`Notification dispatch failed for event ${event._id}:`, err.message);
-  });
+  // 201 only when a row appeared. A retry or an upgrade is a 200: the
+  // caller's request was accepted and acted on, but it did not create
+  // anything, and saying "created" to a device replaying an hour of
+  // backlog would be a lie told several hundred times.
+  const status = result.outcome === CREATED ? 201 : 200;
+  return res.status(status).json({ event: result.event, outcome: result.outcome });
 }
