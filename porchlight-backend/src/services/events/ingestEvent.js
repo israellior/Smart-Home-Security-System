@@ -1,5 +1,6 @@
 import { Event, RANK_BY_KIND } from '../../models/Event.js';
 import { dispatchEventNotifications } from '../notifications/index.js';
+import { eventBus, EVENT_INGESTED } from './eventBus.js';
 
 /**
  * The one place an event enters the system.
@@ -90,7 +91,7 @@ export async function ingestEvent({ device, eventId, kind, at, meta }) {
   const current = result.value;
 
   if (!result.lastErrorObject?.updatedExisting) {
-    notify(device, current);
+    notify(device, current, CREATED);
     return { outcome: CREATED, event: current, reason: null };
   }
 
@@ -110,7 +111,7 @@ export async function ingestEvent({ device, eventId, kind, at, meta }) {
       // A ring is not the motion anyone was already told about - it is
       // new information, with its own per-person preference. Duplicates
       // below stay silent.
-      notify(device, upgraded);
+      notify(device, upgraded, UPGRADED);
       return { outcome: UPGRADED, event: upgraded, reason: null };
     }
   }
@@ -136,7 +137,16 @@ export async function ingestEvent({ device, eventId, kind, at, meta }) {
  * should be trusted to remember. This is the seam where a job queue
  * belongs at real volume - push the event id and let workers fan out.
  */
-function notify(device, event) {
+function notify(device, event, outcome) {
+  // Anyone with the activity list open should see this now rather than on
+  // their next refresh. Emitted before the push/email fan-out because it
+  // is the cheap one, and a viewer already looking at the screen is the
+  // person a notification was trying to reach anyway.
+  //
+  // Synchronous listeners only - an emit that threw would take the whole
+  // ingest with it, so the signaling layer wraps its own sends.
+  eventBus.emit(EVENT_INGESTED, { device, event, outcome });
+
   dispatchEventNotifications(device, event).catch((err) => {
     console.error(`Notification dispatch failed for event ${event._id}:`, err.message);
   });

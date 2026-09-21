@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useDevices } from '../context/DevicesContext';
-import { useDevice } from '../components/DeviceLayout';
+import { useDevice, useDeviceLive } from '../components/DeviceLayout';
 import { api } from '../api/client';
 import styles from './Activity.module.css';
 
@@ -31,10 +31,30 @@ const DELAYED_AFTER_MS = 60 * 1000;
 const wasDelayed = (event) =>
   event.at && event.receivedAt && new Date(event.receivedAt) - new Date(event.at) > DELAYED_AFTER_MS;
 
+/**
+ * Folds one live event into the list.
+ *
+ * Replaces by _id rather than prepending, because an event can arrive
+ * twice: a motion upgraded to a ring is the *same* row with a different
+ * kind, and prepending would show one doorbell press as two.
+ *
+ * Re-sorted by `at` rather than pushed to the top, because a doorbell
+ * coming back from an outage sends real events with old timestamps -
+ * those belong where they happened, which is also where the ordering the
+ * server pages by will put them on the next load.
+ */
+function mergeEvent(list, incoming) {
+  const next = list.filter((e) => e._id !== incoming._id);
+  next.push(incoming);
+  next.sort((a, b) => new Date(b.at) - new Date(a.at) || (a._id < b._id ? 1 : -1));
+  return next;
+}
+
 export function Activity() {
   const { token } = useAuth();
   const { markSeen } = useDevices();
   const device = useDevice();
+  const { lastEvent } = useDeviceLive();
   const deviceId = device._id;
 
   const [events, setEvents] = useState([]);
@@ -81,6 +101,17 @@ export function Activity() {
   useEffect(() => {
     markSeen(deviceId);
   }, [deviceId, markSeen]);
+
+  // A doorbell press while this page is open appears without a refresh.
+  // The frozen watermark above means it lands under "New", which is the
+  // point - someone is at the door right now.
+  useEffect(() => {
+    // The device check is belt-and-braces against a frame arriving while
+    // the socket is being torn down mid-navigation: merging another
+    // doorbell's press into this list would be worse than dropping it.
+    if (!lastEvent || lastEvent.device !== deviceId) return;
+    setEvents((current) => mergeEvent(current, lastEvent));
+  }, [lastEvent, deviceId]);
 
   const hasRealEvents = events.length > 0;
 

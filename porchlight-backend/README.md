@@ -208,6 +208,85 @@ backfilled event isn't quietly buried in yesterday.
 only for `created` — telling a device replaying an hour of backlog that it
 "created" something several hundred times would be a lie.
 
+## Signaling (`/signal`)
+
+A WebSocket sharing the API's port — one origin, one deployment, no second
+CORS story. It carries alerts **up** from the doorbell, viewer requests
+**down** to it, and new events **out** to anyone with the activity list open.
+It does not carry media; that is the SFU's job.
+
+Every connection opens with a `hello` and is closed after ten seconds if it
+doesn't send one.
+
+| role | who | authenticates with |
+|---|---|---|
+| `device` | `porchlightd` | device credential |
+| `pi` | `webrtc-video.py` | device credential |
+| `browser` | a person watching | user JWT, membership checked **at connect** |
+
+### The role trap
+
+`webrtc-video.py` already signs in as `role: 'pi'`, and the device repo's LAN
+stub treats *any* second `pi` hello as a replacement — it closes the first
+socket. So `porchlightd` gets its own role, and replacement is scoped per
+role: a reconnecting daemon displaces only the previous daemon.
+
+Give the daemon `'pi'` instead and every reconnect silently kicks the media
+script off its socket. That presents as video randomly failing rather than as
+an auth problem, so it would be debugged in entirely the wrong place. There is
+a test named after this specifically.
+
+### Rule 3 on the socket, where it actually bites
+
+Over HTTP a 500 was self-correcting. Here, `ok: false` makes the device
+**discard a real doorbell press forever**. So the handler sends:
+
+- `event-ack { ok: true }` — stored (or already stored, or upgraded)
+- `event-ack { ok: false }` — permanent: unknown kind, unparseable timestamp
+- **nothing at all** — transient: the database blipped, a deploy is mid-flight
+
+The ack echoes the kind that was **sent**, not the kind now stored. The device
+dedupes its own outbox by `(eventId, kind)`, so acknowledging a motion as
+"ring" because a later press upgraded the record would leave that motion
+looking unsent forever.
+
+The same distinction exists at connect time: a rejected credential closes with
+`4002`, a transient failure closes with `1013 Try again later`. A client that
+retries the first is a client in an infinite loop.
+
+This was tested against the real failure mode rather than a mock. A 40-event
+backlog flushed at once over the socket had **7 acknowledged and 33 dropped
+transiently — and zero rejected**. Three retry rounds later: 40 acknowledged,
+exactly 40 rows, no duplicates, kinds and sensor times intact. Silence is only
+correct because the device retries; confusing it with rejection would have
+lost 33 real events.
+
+### Presence
+
+`Device.connected` is finally written, and it means *right now*. Ping/pong
+every 30s is what makes that true — a doorbell that loses power never closes
+its socket, it just stops answering, and without heartbeats the app would show
+"Connected and watching" forever.
+
+Two subtleties, both load-bearing:
+
+- **A restart resets every `connected` flag.** Whatever the database last
+  recorded, nothing is connected to a process that just started. (This assumes
+  one app server; with two, presence would need keying per instance, or one
+  booting would wipe the other's live connections.)
+- **A displaced socket's close does not mark the device offline.** The old
+  socket's `close` arrives *after* the new one registered, so the registry
+  only clears an entry that is still its own. Without that guard a reconnect
+  would report as a disconnect and flap the UI.
+
+### Live updates
+
+New events are pushed to browsers watching that doorbell, so the activity list
+updates without a refresh. It fires on `created` and `upgraded` and never on
+`duplicate` — a doorbell flushing an hour of retries must not strobe everyone's
+screen. Ingest publishes to an in-process `eventBus` rather than importing the
+socket registry, so the rules stay testable without a server.
+
 ## Notifications
 
 Two different things, deliberately kept apart:
@@ -275,19 +354,23 @@ own middleware (`middleware/deviceAuth.js`), and events carry the device-owned
 identity and the dedupe/upgrade rules the daemon expects — see "Hardware
 identity and pairing" and "Events: the device's contract" above.
 
-What remains is the transport. `POST /devices/:deviceId/events` still requires
-a *user's* JWT, because the real device path is not an HTTP POST at all:
-`docs/server-brief.md` in the device repo specifies alerts arriving on a
-signaling WebSocket and being acknowledged there. The ingest path those alerts
-will use already exists and is already exercised — the socket is the next
-piece, and it adds a transport rather than changing a rule.
+The gap is closed. Real hardware connects to `/signal` with its own
+credential, reports events there, and is acknowledged per the contract — see
+"Signaling" above. `POST /devices/:deviceId/events` still requires a user's
+JWT and stays that way deliberately: it is the app's path and the one tests
+use, and it runs through the same `ingestEvent`, so the two transports cannot
+disagree about a rule.
+
+What is left is media (LiveKit tokens) and clips (pre-signed uploads).
+`viewer-requested` is already delivered to the device; nothing answers it yet.
 
 ## Project structure
 
 ```
-server.js                    - entry point: connect, build indexes, start Express
+server.js                    - entry point: connect, indexes, presence, listen
 src/
   app.js                     - Express app: middleware, routes, error handler
+  signaling/                 - the WebSocket: registry, hello auth, frames
   config/db.js               - Mongoose connection + ensureIndexes
   models/                    - User, Device, Event, Membership, ... schemas
   middleware/auth.js         - JWT verification (requireAuth)      -> a user
