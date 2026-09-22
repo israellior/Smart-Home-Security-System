@@ -23,10 +23,20 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
  * one clip; it cannot read or delete anything.
  */
 
-// Short on purpose. The uploader never caches a grant between attempts -
-// every retry starts again at step 1 - so a long expiry buys nothing and
-// widens the window on a URL that has leaked.
-const UPLOAD_URL_TTL_SECONDS = 300;
+// Long enough that a grant outlives a bad patch of confirms.
+//
+// This was five minutes on the reasoning that the uploader never caches
+// a grant, so a longer window bought nothing. The device side measured
+// what that actually costs: a confirm that fails re-PUTs the whole file,
+// about 3.5MB with a real camera, roughly every 60 seconds for as long
+// as the failure lasts.
+//
+// And our confirm genuinely can fail for minutes - it needs Mongo, and
+// this cluster drops operations in bursts; one measured run lost 33 of
+// 40 writes transiently. Fifteen minutes lets the uploader reuse a grant
+// and retry step 3 alone about a dozen times before it has to re-upload
+// anything. The exposure is unchanged in kind: one object, PUT only.
+const UPLOAD_URL_TTL_SECONDS = 900;
 
 // Long enough to start playback and seek around a 20-second clip.
 const PLAYBACK_URL_TTL_SECONDS = 900;

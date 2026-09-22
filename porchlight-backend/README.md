@@ -279,9 +279,18 @@ bytes:
 ```
 
 Storage is **Cloudflare R2** over the S3 API. The device never holds bucket
-credentials — what step 1 mints is scoped to one object, PUT only, for five
+credentials — what step 1 mints is scoped to one object, PUT only, for fifteen
 minutes. A stolen doorbell can write one clip; it cannot read or delete
 anything.
+
+That window was five minutes, on the reasoning that the uploader never caches
+a grant so a longer one bought nothing. The device side measured what it
+actually cost: a failed confirm re-PUTs the whole file — ~3.5MB with a real
+camera — roughly every 60 seconds until it succeeds. And our confirm genuinely
+can fail for minutes, because it needs Mongo and this cluster drops operations
+in bursts. Fifteen minutes lets the uploader **reuse a grant that hasn't
+reached its `expiresAt` and retry step 3 alone**, about a dozen times, before
+re-uploading anything.
 
 **A 2xx on step 3 — not step 2 — is what lets the device delete its local
 copy.** An object uploaded and never confirmed is one the server doesn't know
@@ -339,6 +348,32 @@ perfectly good and the device sees a non-2xx it can only retry forever. Both
 settings are verified against the live bucket by a client that sends exactly
 urllib's headers and nothing else — not by an SDK upload, which would pass
 even if the signature demanded headers the real device never sends.
+
+### What the confirm body is and isn't
+
+`{ kind, at, durationMs, partial, bytes }`. Two fields deserve naming:
+
+- **`deviceId` carries no authority and is ignored.** The credential already
+  says who is calling. It was briefly a 403 on mismatch, which was wrong in
+  the expensive direction — a stale label in a device config would have made
+  every confirm fail permanently, wedging uploads over a field that decides
+  nothing. Mismatches are logged, not enforced.
+- **`eventId` is never read from the body.** The path is the only event
+  identity on the wire.
+
+### What each status means to the uploader
+
+The uploader is judged purely by its exit code, so the mapping matters:
+
+| response | meaning |
+|---|---|
+| `204` | done — delete the local copy |
+| `400` | **permanent.** Bad `kind`, unparseable `at`. Retrying cannot help |
+| `409` | the object isn't there, or its size disagrees — **restart at step 1** |
+| `503` | storage unconfigured — transient, keep the clip |
+| `5xx` / no response | transient, keep the clip |
+
+Only `400` means give up. `409` is not a failure so much as an instruction.
 
 ### `bytes` is checked, not trusted
 

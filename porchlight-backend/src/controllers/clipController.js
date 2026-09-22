@@ -86,11 +86,19 @@ export async function confirmUpload(req, res) {
   const { hardware } = req;
   const { deviceId, kind, at, durationMs, partial, bytes } = req.body || {};
 
-  // The body names a doorbell and so does the credential. They have to
-  // agree, or porch-1 could confirm a clip as porch-2 simply by saying
-  // so. Absent is fine - the credential is the authority either way.
+  // `deviceId` in the body is the device's own logging convenience and
+  // carries no authority: the credential already says who is calling,
+  // and this endpoint can only ever act on that doorbell.
+  //
+  // It used to be a 403 on mismatch. That was wrong in the expensive
+  // direction - a stale label in a config file would have made every
+  // confirm fail permanently, wedging uploads over a field that decides
+  // nothing. Logged rather than enforced, so a genuine misconfiguration
+  // is still visible without being fatal.
   if (deviceId && deviceId !== hardware.deviceId) {
-    return res.status(403).json({ error: 'deviceId does not match the authenticated device' });
+    console.warn(
+      `Clip confirm from ${hardware.deviceId} carried deviceId "${deviceId}" - ignoring, credential wins`
+    );
   }
 
   // The object has to actually be there. This is also the check that
