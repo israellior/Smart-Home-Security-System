@@ -13,6 +13,7 @@ import {
 } from '../controllers/deviceController.js';
 import { listEvents, createEvent } from '../controllers/eventController.js';
 import { getClipUrl } from '../controllers/clipController.js';
+import { getViewerToken, takeTalk, releaseTalk } from '../controllers/mediaController.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireDeviceAccess, requireDeviceOwner } from '../middleware/deviceAccess.js';
 
@@ -50,3 +51,11 @@ deviceRoutes.post('/:deviceId/events', requireDeviceAccess, createEvent);
 // the browser fetches from the bucket and this server stays out of the
 // path for recorded media as well as live.
 deviceRoutes.get('/:deviceId/events/:eventId/clip', requireDeviceAccess, getClipUrl);
+
+// Live view and talk. All three are membership-gated by
+// requireDeviceAccess, which is half of what makes removing someone
+// revoke their access immediately - the other half is that the token
+// they already hold expires in two minutes.
+deviceRoutes.post('/:deviceId/live', requireDeviceAccess, getViewerToken);
+deviceRoutes.post('/:deviceId/talk', requireDeviceAccess, takeTalk);
+deviceRoutes.delete('/:deviceId/talk', requireDeviceAccess, releaseTalk);

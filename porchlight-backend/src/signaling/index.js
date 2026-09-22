@@ -3,6 +3,7 @@ import { Device } from '../models/Device.js';
 import { ingestEvent, REJECTED } from '../services/events/ingestEvent.js';
 import { eventBus, EVENT_INGESTED } from '../services/events/eventBus.js';
 import { authenticate } from './authenticate.js';
+import { talkFloorBus, TALK_FLOOR_CHANGED, releaseIfHeld } from '../services/media/talkFloor.js';
 import * as registry from './registry.js';
 import {
   ROLE_DEVICE,
@@ -66,6 +67,21 @@ function broadcastPresence(deviceKey, connected) {
   for (const socket of registry.browserSockets(deviceKey)) {
     send(socket, { type: 'presence', connected });
   }
+}
+
+/**
+ * Tells the doorbell somebody wants to watch: stop recording and bring
+ * up the call. Exported because the live-view endpoint is the natural
+ * place to trigger it - a viewer who has asked for a token is a viewer
+ * who is about to join, whether or not their browser socket is up.
+ *
+ * Returns false when the doorbell is not connected, so the caller can
+ * say so rather than leaving someone watching a black rectangle.
+ */
+export function requestViewer(deviceKey, peer) {
+  const target = registry.deviceSocket(deviceKey);
+  if (!target) return false;
+  return send(target, { type: 'viewer-requested', peer });
 }
 
 /**
@@ -160,6 +176,18 @@ export function attachSignaling(server) {
       for (const socket of registry.browserSockets(String(device._id))) send(socket, payload);
     } catch (err) {
       console.error('Live event push failed:', err.message);
+    }
+  });
+
+  // Who holds the microphone, pushed to everyone watching so the UI can
+  // show it rather than each viewer guessing from whether they hear
+  // themselves.
+  talkFloorBus.on(TALK_FLOOR_CHANGED, ({ deviceKey, userId }) => {
+    try {
+      const payload = { type: 'talk-floor', userId };
+      for (const socket of registry.browserSockets(deviceKey)) send(socket, payload);
+    } catch (err) {
+      console.error('Talk floor broadcast failed:', err.message);
     }
   });
 
@@ -301,8 +329,14 @@ function handleClose(socket) {
   const ctx = socket.ctx;
   if (!ctx) return;
 
-  const { role, deviceKey, device } = ctx;
+  const { role, deviceKey, device, userId } = ctx;
   const removed = registry.remove(deviceKey, role, socket);
+
+  // A viewer whose socket drops has stopped talking whether they said so
+  // or not - closing the tab mid-sentence is the ordinary way a turn
+  // ends. Without this the floor would sit held until someone else
+  // pressed the button.
+  if (role === ROLE_BROWSER && removed) releaseIfHeld(deviceKey, userId);
 
   // `removed` is false when this socket had already been displaced by a
   // newer one. Skipping the presence write in that case is what stops a
