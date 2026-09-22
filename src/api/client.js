@@ -58,5 +58,13 @@ export const api = {
   // are short-lived by design, so ones handed out with a list loaded ten
   // minutes ago would already have expired.
   getClipUrl: (token, deviceId, eventId) =>
-    request(`/devices/${deviceId}/events/${encodeURIComponent(eventId)}/clip`, { token })
+    request(`/devices/${deviceId}/events/${encodeURIComponent(eventId)}/clip`, { token }),
+
+  // Asking for this token is also what nudges the doorbell to stop
+  // recording and join the room, so it is a POST rather than a GET - it
+  // has an effect beyond handing something back.
+  startLive: (token, deviceId) => request(`/devices/${deviceId}/live`, { method: 'POST', token }),
+
+  takeTalk: (token, deviceId) => request(`/devices/${deviceId}/talk`, { method: 'POST', token }),
+  releaseTalk: (token, deviceId) => request(`/devices/${deviceId}/talk`, { method: 'DELETE', token })
 };

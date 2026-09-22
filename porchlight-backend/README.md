@@ -75,7 +75,12 @@ register/login.
 | GET    | `/devices/:deviceId/events` (auth) | Events, newest first. `?limit=` (max 100) and `?before=<cursor>` |
 | POST   | `/devices/:deviceId/events` (auth) | Log an event: `{ type, meta, eventId?, at? }` → `{ event, outcome }` |
 | GET    | `/devices/:deviceId/events/:eventId/clip` (auth) | Short-lived signed URL to play a clip |
+| POST   | `/devices/:deviceId/live`   (auth) | Viewer token + nudges the doorbell to join |
+| POST   | `/devices/:deviceId/talk`   (auth) | Take the microphone (last press wins) |
+| DELETE | `/devices/:deviceId/talk`   (auth) | Give it back — holder only |
 | GET    | `/devices/:deviceId/self` (device) | What the Pi can see about itself. Device credential, not a JWT |
+| POST   | `/devices/:deviceId/media-token/publisher` (device) | Camera + mic up, cannot subscribe |
+| POST   | `/devices/:deviceId/media-token/listener` (device) | Subscribe only, publishes nothing |
 | POST   | `/clips/:eventId/upload-url` (device) | Empty body → a short-lived PUT grant |
 | POST   | `/clips/:eventId/confirm`   (device) | `{ kind, at, durationMs, partial, bytes }` → 204 |
 
@@ -494,6 +499,89 @@ updates without a refresh. It fires on `created` and `upgraded` and never on
 `duplicate` — a doorbell flushing an hour of retries must not strobe everyone's
 screen. Ingest publishes to an in-process `eventBus` rather than importing the
 socket registry, so the rules stay testable without a server.
+
+## Live video and talk
+
+LiveKit Cloud carries the media. The Pi publishes one stream and LiveKit
+copies it out to each viewer; both ends connect **outward**, so no home
+router has to accept an incoming connection and no TURN relay is needed.
+This server is never in the media path — it mints tokens and decides who may
+speak.
+
+Minting is **local signing**: the API key and secret never leave the server
+and there is no call to LiveKit to issue a token, which is why tokens can be
+two minutes long without costing a round trip.
+
+### Four kinds, and the differences are the security model
+
+| kind | identity | canPublish | canSubscribe |
+|---|---|---|---|
+| device publisher | `device:<id>:pub` | camera + mic | **false** |
+| device listener | `device:<id>:sub` | false | true |
+| viewer | `user:<uid>` | false | true |
+| talker | `user:<uid>` | **microphone only** | true |
+
+**The Pi holds two tokens, not one.** Split this way the publishing half
+*literally cannot* subscribe — `canSubscribe: false` is a claim inside the
+token that LiveKit rejects on, not a policy this server enforces. A leaked
+publisher token can't be turned into a way to watch the house. The split also
+lands cleanly on the two processes already running on the Pi.
+
+**Only the talker publishes, and only audio.** `canPublishSources` supersedes
+`canPublish` in LiveKit, so listing `microphone` alone is a whitelist rather
+than a request: never camera, never screen share.
+
+Permissions are looked up **by kind in a table** rather than assembled from
+arguments, so no call site can ask for "publisher, but also able to
+subscribe".
+
+### Push-to-talk, last press wins
+
+Holding takes the floor from whoever had it; releasing gives it up. 1–5
+viewers with typically one talking — a queue would be machinery for a
+situation that doesn't arise, and being cut off is self-regulating among
+people who know each other.
+
+Three details that matter more than they look:
+
+- **Revoke before grant**, so two microphones are never live at once. A
+  doorbell with two people talking into it is worse than a moment of silence.
+- **Permissions change on the live session** via `updateParticipant`, not by
+  issuing a new token. A token swap would tear down and rebuild the
+  connection — a second of dead air every time somebody spoke.
+- **Floors expire after a minute and release when the holder's socket
+  drops.** Closing a laptop mid-sentence is the ordinary way a turn ends; the
+  alternative is a floor nobody can take back. Only the holder may release,
+  so a stale release from someone already cut off can't silence whoever took
+  it from them.
+
+Asking for a viewer token also sends `viewer-requested` to the doorbell —
+requesting a token *is* the intent to watch, and relying on the browser's own
+socket for that cue would be one more thing that has to be up.
+
+### Frontend
+
+`livekit-client` is roughly three times the size of the rest of this app, so
+`LiveView` is loaded with `React.lazy`. Inline it would be downloaded by
+everyone opening any page to serve the one thing they may never press; split,
+the main bundle stays ~198KB and the 565KB chunk arrives with the component.
+
+Talk is push-to-talk in the UI too, not a toggle. A toggle left on is a
+microphone in someone's hallway that nobody remembers switching on — and
+since the floor is exclusive, it would also lock everyone else out.
+
+### A failure worth knowing about
+
+A wrong API secret is nearly invisible. Because minting is local signing,
+every endpoint returns 200 with perfectly-formed claims whatever the secret
+is; it only breaks where media actually connects. During development the
+configured secret turned out to be the dashboard's *masked display* — 32
+bullet characters — and everything looked healthy. The check that caught it
+was a real `listRooms()` call, which is worth keeping in mind as the way to
+tell "configured" from "correct".
+
+Without LiveKit configured the live endpoints return **503** and the rest of
+the app runs normally.
 
 ## Notifications
 

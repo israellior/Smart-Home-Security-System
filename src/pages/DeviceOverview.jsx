@@ -1,7 +1,18 @@
+import { lazy, Suspense } from 'react';
 import { Link } from 'react-router-dom';
 import { useDevice } from '../components/DeviceLayout';
 import { GlowIcon } from '../components/GlowIcon';
 import styles from './DeviceOverview.module.css';
+
+/**
+ * Split out, because the LiveKit client is roughly three times the size
+ * of the entire rest of this app. Bundled inline it would be downloaded
+ * by everyone opening any page, to serve the one thing they may never
+ * press. Loaded this way it arrives with the component that needs it.
+ */
+const LiveView = lazy(() =>
+  import('../components/LiveView').then((m) => ({ default: m.LiveView }))
+);
 
 /**
  * One doorbell's headline view - what Home used to be, back when there
@@ -22,13 +33,22 @@ export function DeviceOverview() {
           {device.connected ? 'Connected and watching' : 'No doorbell connected yet'}
         </p>
         {device.location && <p className={styles.deviceLocation}>{device.location}</p>}
-        <button className={styles.liveBtn} disabled>
-          View live — coming soon
-        </button>
-        <p className={styles.heroNote}>
-          Live video and two-way talk turn on automatically once your camera and speaker are
-          wired up. For now, you can still set up the basics.
-        </p>
+
+        {device.provisioned ? (
+          <Suspense fallback={<p className={styles.heroNote}>Loading live view…</p>}>
+            <LiveView device={device} />
+          </Suspense>
+        ) : (
+          <>
+            <button className={styles.liveBtn} disabled>
+              View live
+            </button>
+            <p className={styles.heroNote}>
+              This doorbell has no hardware paired with it yet. Live video and two-way talk turn
+              on once a camera is set up and connected.
+            </p>
+          </>
+        )}
       </div>
 
       <p className={styles.sectionLabel}>Get started</p>
