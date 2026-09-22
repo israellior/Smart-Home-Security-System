@@ -73,6 +73,14 @@ export function useLiveView(token, deviceId) {
     const room = new Room({ adaptiveStream: true, dynacast: true });
     roomRef.current = room;
 
+    // `hasVideo` keys on an actual video track, never on how many
+    // participants are in the room, and that distinction is load-bearing.
+    //
+    // The Pi joins as TWO participants: `device:<id>:pub` publishes the
+    // camera, and `device:<id>:sub` exists only to hear viewers and
+    // publishes nothing, ever. Counting participants would see two and
+    // conclude the camera had arrived - or see one and wait forever -
+    // depending on which connected first.
     room.on(RoomEvent.TrackSubscribed, (track) => {
       if (track.kind === Track.Kind.Video && videoRef.current) {
         track.attach(videoRef.current);

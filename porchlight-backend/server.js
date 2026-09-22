@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { createApp } from './src/app.js';
 import { connectDB, ensureIndexes } from './src/config/db.js';
 import { attachSignaling, resetPresence } from './src/signaling/index.js';
+import { checkClockSkew } from './src/config/media.js';
 
 const PORT = process.env.PORT || 4000;
 
@@ -28,6 +29,12 @@ async function main() {
   server.listen(PORT, () => {
     console.log(`Porchlight API listening on http://localhost:${PORT}`);
   });
+
+  // After listening, and not awaited. Media tokens carry nbf = mint
+  // time, so a drifted clock breaks live view in a way that looks like
+  // anything but a clock - but finding that out must not delay the API
+  // from taking alerts.
+  checkClockSkew();
 }
 
 main().catch((err) => {

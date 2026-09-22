@@ -52,7 +52,17 @@ export function roomName(deviceId) {
 const GRANTS = {
   publisher: {
     identity: (deviceId) => `device:${deviceId}:pub`,
-    grant: { canPublish: true, canSubscribe: false, canPublishData: false }
+    grant: {
+      canPublish: true,
+      // Named explicitly rather than left open. `canPublish: true` alone
+      // permits every source including screen share, which a doorbell
+      // has no concept of - and the viewer side is already a whitelist,
+      // so leaving this one unconstrained was an asymmetry with no
+      // reason behind it.
+      canPublishSources: [TrackSource.CAMERA, TrackSource.MICROPHONE],
+      canSubscribe: false,
+      canPublishData: false
+    }
   },
   listener: {
     identity: (deviceId) => `device:${deviceId}:sub`,
@@ -106,6 +116,51 @@ export async function mintMediaToken(kind, { deviceId, userId, name } = {}) {
     identity,
     expiresAt: new Date(Date.now() + TOKEN_TTL_SECONDS * 1000).toISOString()
   };
+}
+
+/**
+ * Warns if this server's clock has drifted.
+ *
+ * Every token carries `nbf` set to the moment it was minted, and the SDK
+ * hardcodes that - there is no way to backdate it. So a server clock
+ * running fast issues tokens that are not yet valid, and LiveKit's
+ * leeway is about a minute. The failure mode is the bad kind: tokens
+ * mint perfectly, every endpoint returns 200, and joins fail somewhere
+ * far away with a message about the token.
+ *
+ * Nothing here can fix a wrong clock, but it can stop it being silent.
+ * Any HTTPS response carries a Date header, so LiveKit itself is the
+ * reference - no extra dependency and no NTP client.
+ *
+ * Deliberately not awaited at startup: a media check must not be able to
+ * stop the API from serving alerts.
+ */
+export async function checkClockSkew() {
+  if (!mediaConfigured) return null;
+
+  try {
+    const res = await fetch(LIVEKIT_URL.replace(/^wss:/, 'https:'), { method: 'HEAD' });
+    const theirs = res.headers.get('date');
+    if (!theirs) return null;
+
+    const skewMs = Date.now() - new Date(theirs).getTime();
+    const skew = Math.round(skewMs / 1000);
+
+    // A Date header has one-second resolution and the round trip costs
+    // something, so a few seconds means nothing. Tens of seconds is
+    // heading for the leeway.
+    if (Math.abs(skew) >= 20) {
+      console.warn(
+        `CLOCK SKEW: this server is ${skew > 0 ? 'ahead of' : 'behind'} LiveKit by ~${Math.abs(skew)}s. ` +
+          'Media tokens carry nbf = mint time and LiveKit allows about a minute, so joins will ' +
+          'start failing. Sync this machine\'s clock.'
+      );
+    }
+    return skew;
+  } catch (err) {
+    // Not reachable is not this check's problem to report.
+    return null;
+  }
 }
 
 /**

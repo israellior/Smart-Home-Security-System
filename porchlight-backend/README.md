@@ -449,6 +449,13 @@ script off its socket. That presents as video randomly failing rather than as
 an auth problem, so it would be debugged in entirely the wrong place. There is
 a test named after this specifically.
 
+**`pi` currently has no client.** Once media moved to LiveKit, the media
+process stopped needing a socket here at all — it fetches two tokens over
+HTTP and talks to LiveKit directly, so the daemon's `device` socket is the
+only one a doorbell opens. The role is kept because the hazard returns the
+moment anything reopens a second socket, and a role that has to be
+reintroduced is a role whose reasoning has to be rediscovered.
+
 ### Rule 3 on the socket, where it actually bites
 
 Over HTTP a 500 was self-correcting. Here, `ok: false` makes the device
@@ -516,10 +523,18 @@ two minutes long without costing a round trip.
 
 | kind | identity | canPublish | canSubscribe |
 |---|---|---|---|
-| device publisher | `device:<id>:pub` | camera + mic | **false** |
+| device publisher | `device:<id>:pub` | **camera + mic only** | **false** |
 | device listener | `device:<id>:sub` | false | true |
 | viewer | `user:<uid>` | false | true |
 | talker | `user:<uid>` | **microphone only** | true |
+
+**The Pi is two participants, not one**, and that leaks into the UI. The
+`:sub` half publishes nothing, ever — so anything asking "is the camera
+there yet?" must key on **a video track**, never on participant count.
+Counting would see two and conclude the camera had arrived, or see one and
+wait forever, depending on which connected first. The mirror rule applies on
+the device: it must skip `device:` identities when deciding who its audience
+is, or it counts itself and the call never ends.
 
 **The Pi holds two tokens, not one.** Split this way the publishing half
 *literally cannot* subscribe — `canSubscribe: false` is a claim inside the
@@ -569,6 +584,19 @@ the main bundle stays ~198KB and the 565KB chunk arrives with the component.
 Talk is push-to-talk in the UI too, not a toggle. A toggle left on is a
 microphone in someone's hallway that nobody remembers switching on — and
 since the floor is exclusive, it would also lock everyone else out.
+
+### The server's clock is load-bearing
+
+Every token carries `nbf` set to the moment it was minted, and the SDK
+hardcodes that — there is no option to backdate it. So a server clock running
+fast issues tokens that are not yet valid, and LiveKit's leeway is about a
+minute.
+
+Nothing here can fix a wrong clock, but `checkClockSkew()` stops it being
+silent: on startup it compares this machine against the `Date` header of a
+response from LiveKit itself — no NTP client, no extra dependency — and warns
+if they differ by 20 seconds or more. It runs after `listen` and is not
+awaited, because a media check must never delay the API from taking alerts.
 
 ### A failure worth knowing about
 
