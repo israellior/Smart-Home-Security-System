@@ -82,6 +82,56 @@
   font-size: 15px;
 }
 
+/* Wraps a row and its player, so an open clip stays visually attached
+   to the event it belongs to rather than floating between rows. */
+.eventGroup {
+  display: flex;
+  flex-direction: column;
+}
+
+.playBtn {
+  font: inherit;
+  font-size: 12px;
+  color: var(--brass);
+  background: none;
+  border: 1px solid color-mix(in srgb, var(--brass) 40%, transparent);
+  border-radius: 999px;
+  padding: 2px 10px;
+  margin-left: 10px;
+  cursor: pointer;
+}
+
+.playBtn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--brass) 12%, transparent);
+}
+
+.playBtn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.partialTag {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-left: 6px;
+}
+
+.player {
+  width: 100%;
+  max-width: 100%;
+  border-radius: 8px;
+  margin: 4px 0 12px;
+  background: #000;
+}
+
+.clipError {
+  font-size: 13px;
+  color: var(--ember);
+  margin: 4px 0 12px;
+}
+
 /* Quieter than previewTag - it annotates a real event rather than
    labelling the whole section as fake. */
 .delayedTag {

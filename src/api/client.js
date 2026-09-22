@@ -52,5 +52,11 @@ export const api = {
   removeMember: (token, id, userId) =>
     request(`/devices/${id}/members/${userId}`, { method: 'DELETE', token }),
 
-  listEvents: (token, deviceId) => request(`/devices/${deviceId}/events`, { token })
+  listEvents: (token, deviceId) => request(`/devices/${deviceId}/events`, { token }),
+
+  // Fetched when someone presses play, not with the list. Playback URLs
+  // are short-lived by design, so ones handed out with a list loaded ten
+  // minutes ago would already have expired.
+  getClipUrl: (token, deviceId, eventId) =>
+    request(`/devices/${deviceId}/events/${encodeURIComponent(eventId)}/clip`, { token })
 };

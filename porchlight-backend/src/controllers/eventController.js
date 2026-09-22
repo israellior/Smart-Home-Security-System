@@ -1,6 +1,39 @@
 import { randomUUID } from 'node:crypto';
 import { Event } from '../models/Event.js';
+import { Clip } from '../models/Clip.js';
 import { ingestEvent, CREATED, REJECTED } from '../services/events/ingestEvent.js';
+
+/**
+ * Attaches clip metadata to a page of events.
+ *
+ * One query for the whole page, not one per row: the same `$in` shape
+ * the notification dispatch uses, and for the same reason - a per-row
+ * lookup would turn a 50-event page into 51 round trips.
+ *
+ * No URL here. A playback URL is short-lived by design, and a list that
+ * was loaded ten minutes ago would hand out URLs that have already
+ * expired. The frontend asks for one when someone actually presses play.
+ */
+async function withClips(events, deviceId) {
+  if (events.length === 0) return [];
+
+  const clips = await Clip.find({
+    device: deviceId,
+    eventId: { $in: events.map((e) => e.eventId) },
+    status: 'stored'
+  });
+
+  const byEventId = new Map(clips.map((c) => [c.eventId, c]));
+
+  return events.map((event) => {
+    const json = event.toJSON();
+    const clip = byEventId.get(event.eventId);
+    if (clip) {
+      json.clip = { durationMs: clip.durationMs, partial: clip.partial, bytes: clip.bytes };
+    }
+    return json;
+  });
+}
 
 // Both handlers run behind requireDeviceAccess, so req.device is already
 // loaded and already confirmed to belong to this caller. That's why the
@@ -66,9 +99,14 @@ export async function listEvents(req, res) {
   const hasMore = events.length > limit;
   if (hasMore) events.pop();
 
+  // Cursor from the document, not the serialized form: encodeCursor
+  // reads event.at as a Date, and toJSON has already turned it into a
+  // string by the time withClips is done.
+  const nextCursor = hasMore ? encodeCursor(events[events.length - 1]) : null;
+
   return res.json({
-    events,
-    nextCursor: hasMore ? encodeCursor(events[events.length - 1]) : null
+    events: await withClips(events, req.device._id),
+    nextCursor
   });
 }
 

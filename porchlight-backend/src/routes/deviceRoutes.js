@@ -12,6 +12,7 @@ import {
   removeMember
 } from '../controllers/deviceController.js';
 import { listEvents, createEvent } from '../controllers/eventController.js';
+import { getClipUrl } from '../controllers/clipController.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireDeviceAccess, requireDeviceOwner } from '../middleware/deviceAccess.js';
 
@@ -44,3 +45,8 @@ deviceRoutes.delete('/:id/members/:userId', requireDeviceAccess, removeMember);
 
 deviceRoutes.get('/:deviceId/events', requireDeviceAccess, listEvents);
 deviceRoutes.post('/:deviceId/events', requireDeviceAccess, createEvent);
+
+// Playback. Hands back a short-lived signed URL rather than the file, so
+// the browser fetches from the bucket and this server stays out of the
+// path for recorded media as well as live.
+deviceRoutes.get('/:deviceId/events/:eventId/clip', requireDeviceAccess, getClipUrl);

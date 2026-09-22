@@ -113,6 +113,26 @@ export function Activity() {
     setEvents((current) => mergeEvent(current, lastEvent));
   }, [lastEvent, deviceId]);
 
+  // One open clip at a time, tracked by eventId. A signed URL is fetched
+  // on press rather than with the list, because it expires - a list left
+  // open for twenty minutes would otherwise hold a page of dead URLs.
+  const [clip, setClip] = useState({ eventId: null, url: null, loading: false, error: null });
+
+  const openClip = async (eventId) => {
+    // Pressing Watch on the open clip closes it.
+    if (clip.eventId === eventId && (clip.url || clip.error)) {
+      setClip({ eventId: null, url: null, loading: false, error: null });
+      return;
+    }
+    setClip({ eventId, url: null, loading: true, error: null });
+    try {
+      const { url } = await api.getClipUrl(token, deviceId, eventId);
+      setClip({ eventId, url, loading: false, error: null });
+    } catch (err) {
+      setClip({ eventId, url: null, loading: false, error: err.message });
+    }
+  };
+
   const hasRealEvents = events.length > 0;
 
   // Split against the frozen watermark, comparing arrival time rather
@@ -125,18 +145,45 @@ export function Activity() {
   const earlierEvents = events.filter((event) => !isNew(event));
 
   const renderRow = (event, markNew) => (
-    <div className={`${styles.eventRow} ${markNew ? styles.isNew : ''}`} key={event._id}>
-      <span className={styles.eventTitle}>
-        {EVENT_TITLES[event.type] || event.type}
-        {wasDelayed(event) && (
-          <span className={styles.delayedTag} title="The doorbell couldn't reach us at the time">
-            delayed
-          </span>
-        )}
-      </span>
-      {/* Sensor time, not arrival time: this says when someone was at the
-          door, which is the question the list is actually answering. */}
-      <span className={styles.eventTime}>{new Date(event.at).toLocaleString()}</span>
+    <div className={styles.eventGroup} key={event._id}>
+      <div className={`${styles.eventRow} ${markNew ? styles.isNew : ''}`}>
+        <span className={styles.eventTitle}>
+          {EVENT_TITLES[event.type] || event.type}
+          {wasDelayed(event) && (
+            <span className={styles.delayedTag} title="The doorbell couldn't reach us at the time">
+              delayed
+            </span>
+          )}
+          {event.clip && (
+            <button
+              className={styles.playBtn}
+              type="button"
+              onClick={() => openClip(event.eventId)}
+              disabled={clip.eventId === event.eventId && clip.loading}
+            >
+              {clip.eventId === event.eventId && clip.loading ? 'Loading…' : '▶ Watch'}
+              {event.clip.partial && (
+                <span className={styles.partialTag} title="A viewer arrived and cut the recording short">
+                  partial
+                </span>
+              )}
+            </button>
+          )}
+        </span>
+        {/* Sensor time, not arrival time: this says when someone was at the
+            door, which is the question the list is actually answering. */}
+        <span className={styles.eventTime}>{new Date(event.at).toLocaleString()}</span>
+      </div>
+
+      {clip.eventId === event.eventId && clip.url && (
+        // controls + autoPlay, because pressing Watch is already the
+        // decision to play - making them press again would be a second
+        // click for nothing.
+        <video className={styles.player} src={clip.url} controls autoPlay playsInline />
+      )}
+      {clip.eventId === event.eventId && clip.error && (
+        <p className={styles.clipError}>{clip.error}</p>
+      )}
     </div>
   );
 

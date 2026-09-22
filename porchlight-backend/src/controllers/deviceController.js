@@ -2,6 +2,8 @@ import mongoose from 'mongoose';
 import { Device } from '../models/Device.js';
 import { Membership } from '../models/Membership.js';
 import { Event } from '../models/Event.js';
+import { Clip } from '../models/Clip.js';
+import { storageConfigured, deleteClipObjects } from '../config/storage.js';
 import { generateShareCode, normalizeShareCode } from '../utils/shareCode.js';
 
 // Fields a client is allowed to set. Anything else in the body - owner,
@@ -239,6 +241,24 @@ export async function updatePreferences(req, res) {
 
 export async function deleteDevice(req, res) {
   const deviceId = req.device._id;
+
+  // Recordings first, and the bucket before the rows that point at it.
+  // A deleted doorbell leaving its video behind is the one failure here
+  // with a privacy cost - the other orphans are only clutter - and once
+  // the Clip rows are gone there is nothing left that knows the objects
+  // exist. Best-effort: a bucket that is unreachable must not block
+  // someone deleting their doorbell.
+  if (storageConfigured && req.device.deviceId) {
+    const clips = await Clip.find({ device: deviceId }, { eventId: 1 });
+    if (clips.length > 0) {
+      try {
+        await deleteClipObjects(req.device.deviceId, clips.map((c) => c.eventId));
+      } catch (err) {
+        console.error(`Could not remove clips for ${req.device.deviceId}:`, err.message);
+      }
+    }
+  }
+  await Clip.deleteMany({ device: deviceId });
 
   // Mongo has no cascading deletes, so orphaned events and memberships
   // are ours to clean up. Events first: if this dies halfway, a device

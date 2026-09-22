@@ -74,7 +74,10 @@ register/login.
 | DELETE | `/devices/:id/members/:userId` (auth) | Remove someone (owner) or leave (yourself) |
 | GET    | `/devices/:deviceId/events` (auth) | Events, newest first. `?limit=` (max 100) and `?before=<cursor>` |
 | POST   | `/devices/:deviceId/events` (auth) | Log an event: `{ type, meta, eventId?, at? }` → `{ event, outcome }` |
+| GET    | `/devices/:deviceId/events/:eventId/clip` (auth) | Short-lived signed URL to play a clip |
 | GET    | `/devices/:deviceId/self` (device) | What the Pi can see about itself. Device credential, not a JWT |
+| POST   | `/clips/:eventId/upload-url` (device) | Empty body → a short-lived PUT grant |
+| POST   | `/clips/:eventId/confirm`   (device) | `{ kind, at, durationMs, partial, bytes }` → 204 |
 
 Routes marked **(device)** authenticate with a *device credential*
 (`Authorization: Bearer pl_porch-1_…`), not a user JWT. The two are separate
@@ -264,6 +267,120 @@ backfilled event isn't quietly buried in yesterday.
 only for `created` — telling a device replaying an hour of backlog that it
 "created" something several hundred times would be a lie.
 
+## Clips
+
+Three steps, and the server is not in the middle of the one that carries
+bytes:
+
+```
+1. POST /api/clips/<eventId>/upload-url   (device)  -> a short-lived PUT grant
+2. PUT  <that url>                                  -> straight to the bucket
+3. POST /api/clips/<eventId>/confirm      (device)  -> metadata, in the body
+```
+
+Storage is **Cloudflare R2** over the S3 API. The device never holds bucket
+credentials — what step 1 mints is scoped to one object, PUT only, for five
+minutes. A stolen doorbell can write one clip; it cannot read or delete
+anything.
+
+**A 2xx on step 3 — not step 2 — is what lets the device delete its local
+copy.** An object uploaded and never confirmed is one the server doesn't know
+exists, so every non-2xx anywhere means "keep your copy", and the device
+restarts at step 1.
+
+### Step 1 takes an empty body, and that shapes the schema
+
+The uploader sends literally `{}` — no kind, no timestamp, nothing but the
+credential and the eventId in the path. That is not enough to create an
+`Event`, which requires a kind and a sensor time. So clips get **their own
+collection**: `Clip` binds `(device, eventId)` to an object at step 1, and the
+confirm fills it in and creates the Event.
+
+Order independence falls out of that for free. A clip may arrive before its
+alert or with no alert ever, and nothing in step 1 depends on the Event
+existing.
+
+### The confirm goes through `ingestEvent`
+
+`kind` arrives on the confirm as well as on the alert, and needs the same
+maximum rule — a late `motion` confirm must never pull an event back down from
+`ring`. Rather than reimplement that, the confirm is simply a **third caller**
+of `ingestEvent`, alongside the socket and the HTTP endpoint. No second
+implementation, so no way for the two to disagree, and it creates the Event
+when the clip arrived first.
+
+### Confirming is idempotent, which is subtler than it sounds
+
+Re-confirming is how a device that crashed between the PUT and the confirm
+recovers — so it has to work *after* the first confirm has already promoted the
+object out of the pending prefix. The confirm therefore looks in both places,
+skips the promote when there is nothing new, and treats an absent field as
+"unchanged" rather than "false". Writing defaults for whatever a particular
+call omitted would quietly erase a `partial` flag the first confirm was
+explicit about. Both of those were caught by tests, not by reading.
+
+### Presigning for a client that isn't an SDK
+
+The uploader is Python's `urllib`. It sends `Host`, `User-Agent`,
+`Accept-Encoding`, `Content-Length` and `Content-Type` — and **no checksum
+header of any kind**. Two settings in `config/storage.js` exist entirely
+because of that:
+
+- `requestChecksumCalculation: 'WHEN_REQUIRED'` — since v3.729 the AWS SDK adds
+  `x-amz-sdk-checksum-algorithm` to PutObject by default. If that lands in the
+  signature, a client that doesn't send it fails **every** upload.
+- `signableHeaders: new Set(['host'])` — anything else signed becomes a header
+  the device is required to reproduce byte-for-byte, and we don't control what
+  it sends. `Content-Type` rides in the returned `headers` instead, which the
+  uploader copies verbatim.
+
+From the server's side that failure is invisible: we generate a URL that looks
+perfectly good and the device sees a non-2xx it can only retry forever. Both
+settings are verified against the live bucket by a client that sends exactly
+urllib's headers and nothing else — not by an SDK upload, which would pass
+even if the signature demanded headers the real device never sends.
+
+### `bytes` is checked, not trusted
+
+A truncated upload can still return 2xx from the bucket, which makes it
+indistinguishable from a good one unless the sizes are compared. The confirm
+HEADs the object and compares; a mismatch is a 409, which means the device
+keeps its copy and tries again.
+
+### Object layout and the lifecycle rule
+
+```
+pending/<deviceId>/<eventId>.mp4    uploaded, not yet confirmed
+clips/<deviceId>/<eventId>.mp4      confirmed, playable
+```
+
+The split exists so "an object nobody confirmed" is answerable **by prefix**,
+which lets a bucket lifecycle rule expire orphans with no cron job and no
+sweeper of ours. Add one rule in R2: **delete objects under `pending/` after 1
+day.** The move costs one server-side copy and one delete per clip — no egress,
+well inside R2's free operation allowance.
+
+Keys are derived from `(deviceId, eventId)`, never stored. Storing them would
+be a second source of truth for where a file lives, and the two would disagree
+the first time the layout changed.
+
+### Playback
+
+`GET /api/devices/:deviceId/events/:eventId/clip` (user auth, membership
+checked) returns a short-lived signed GET. The browser fetches from the bucket
+directly — proxying recordings would keep this server out of the live media
+path only to make it a CDN for the recorded one.
+
+The events list reports `clip: { durationMs, partial, bytes }` but **no URL**:
+playback URLs expire, and a list loaded twenty minutes ago would hold a page of
+dead ones. The frontend asks for one when someone presses play. Clips are
+attached with a single `$in` per page, the same shape the notification dispatch
+uses.
+
+Without R2 configured the clip endpoints return **503** and everything else
+runs normally. A doorbell that cannot upload keeps its recording and retries,
+which is what it already does for every other transient failure.
+
 ## Signaling (`/signal`)
 
 A WebSocket sharing the API's port — one origin, one deployment, no second
@@ -434,6 +551,7 @@ src/
   middleware/deviceAccess.js - "may this user touch this device?"
   controllers/               - request handlers, one file per resource
   routes/                    - route tables, wired to controllers
+  config/storage.js          - R2: presigned upload and playback grants
   services/events/           - ingestEvent: the only way an event gets in
   services/notifications/    - fan-out to push and email, plus the log
   utils/shareCode.js         - person-to-person access codes
