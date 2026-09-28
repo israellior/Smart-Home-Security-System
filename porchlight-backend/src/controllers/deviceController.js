@@ -5,6 +5,14 @@ import { Event } from '../models/Event.js';
 import { Clip } from '../models/Clip.js';
 import { storageConfigured, deleteClipObjects } from '../config/storage.js';
 import { generateShareCode, normalizeShareCode } from '../utils/shareCode.js';
+import {
+  claimCodeConfigured,
+  hashClaimCode,
+  isValidClaimCode,
+  normalizeClaimCode
+} from '../utils/claimCode.js';
+import { consume, forget } from '../utils/rateLimit.js';
+import { disconnectHardware } from '../signaling/index.js';
 
 // Fields a client is allowed to set. Anything else in the body - owner,
 // connected, _id - is ignored rather than rejected, so a client sending
@@ -115,29 +123,21 @@ export async function getDevice(req, res) {
   return res.json({ device: deviceForMember(req.device, req.membership) });
 }
 
+/**
+ * A doorbell that exists in the app before any hardware does.
+ *
+ * No share code. One is generated on demand by createShareCode below,
+ * when the owner actually wants to let somebody else in - which is the
+ * A6 change, and the reason the collision-retry loop that used to be here
+ * is gone with it: nothing is allocated at creation to collide.
+ */
 export async function createDevice(req, res) {
   const { name, location } = req.body;
 
-  // Share codes are random, so a collision is possible even if unlikely.
-  // The unique index is the real guarantee; this loop just turns a
-  // one-in-a-million duplicate key into a retry instead of a 500.
-  let device = null;
-  for (let attempt = 0; attempt < 5 && !device; attempt++) {
-    try {
-      device = await Device.create({
-        name: name?.trim() || 'Front Door',
-        location: location?.trim() || '',
-        shareCode: generateShareCode()
-      });
-    } catch (err) {
-      if (err.code === 11000 && err.keyPattern?.shareCode) continue;
-      throw err;
-    }
-  }
-
-  if (!device) {
-    return res.status(503).json({ error: 'Could not allocate a share code, please try again' });
-  }
+  const device = await Device.create({
+    name: name?.trim() || 'Front Door',
+    location: location?.trim() || ''
+  });
 
   const membership = await Membership.create({
     device: device._id,
@@ -148,24 +148,45 @@ export async function createDevice(req, res) {
 }
 
 /**
- * Join a doorbell with its share code, and claim it if nobody has.
+ * Join a doorbell somebody else owns, with the share code they gave you.
  *
- * Hardware is provisioned with no owner - a doorbell boots and reports
- * before any account exists for it - so the first person to submit its
- * share code becomes the owner and everyone after is a member. That is
- * the whole claiming story: the device never takes part in it.
+ * A share code makes you a member. It no longer makes anybody an owner,
+ * and that is the A6 change here.
+ *
+ * It used to: hardware was minted with a share code printed beside its
+ * credential, and the first person to type that code became the owner. On
+ * a doorbell bolted to the outside of a house, with the code on a sticker
+ * on the back of the case, that meant anyone who photographed the unit or
+ * found the packaging could take ownership of a camera pointed at a front
+ * door - permanently, with no interaction with the person who bought it.
+ *
+ * Ownership now comes from a claim code, which is single-use and consumed.
+ * Share codes are generated inside the app by someone who already owns
+ * the doorbell, are revocable, and are printed on nothing.
  *
  * Idempotent on purpose: a double-tapped button or a retried request
  * re-reports the membership the caller already has instead of erroring.
  */
 export async function joinDevice(req, res) {
-  const shareCode = normalizeShareCode(req.body?.shareCode);
+  const raw = String(req.body?.shareCode ?? '');
+  const shareCode = normalizeShareCode(raw);
   if (!shareCode) {
     return res.status(400).json({ error: 'A share code is required' });
   }
 
   const device = await Device.findOne({ shareCode });
   if (!device) {
+    // The two codes look different on purpose - a share code carries the
+    // PORCH- prefix and a claim code is six bare characters - so when
+    // someone types the code off the back of a new doorbell into the
+    // wrong box, say which box it belongs in rather than telling them
+    // their doorbell does not exist.
+    if (isValidClaimCode(raw)) {
+      return res.status(404).json({
+        error:
+          'That looks like the claim code on a new doorbell. Use "Set up a new doorbell" instead.'
+      });
+    }
     return res.status(404).json({ error: 'No doorbell found with that code' });
   }
 
@@ -174,40 +195,217 @@ export async function joinDevice(req, res) {
     return res.json({ device: deviceForMember(device, existing), alreadyMember: true });
   }
 
-  const unclaimed = !(await Membership.exists({ device: device._id, role: 'owner' }));
+  // A share code on a doorbell nobody owns is a leftover from when mint
+  // printed one, and honouring it would be the old hole still open. There
+  // is nobody to be a member *of*, so send them to the claim flow.
+  const owned = await Membership.exists({ device: device._id, role: 'owner' });
+  if (!owned) {
+    return res.status(409).json({
+      error: 'Nobody has set this doorbell up yet. Claim it with the code on the unit itself.'
+    });
+  }
 
   let membership;
   try {
     membership = await Membership.create({
       device: device._id,
       user: req.userId,
-      role: unclaimed ? 'owner' : 'member'
+      role: 'member'
     });
   } catch (err) {
     if (err.code !== 11000) throw err;
 
-    // Two possible collisions, and they need different answers.
-    //
-    // On { device, user }: the same person joined twice at once. They are
-    // a member either way, so read back the winner's membership - the
-    // response has to carry their real preferences.
+    // The same person joined twice at once, colliding on { device, user }.
+    // They are a member either way, so read back the winner's membership
+    // - the response has to carry their real preferences.
     const won = await Membership.findOne({ device: device._id, user: req.userId });
     if (won) {
       return res.json({ device: deviceForMember(device, won), alreadyMember: true });
     }
-
-    // On { device, role: 'owner' }: two people claimed an unowned
-    // doorbell in the same instant and this one lost. Losing the claim is
-    // not losing access - retry as a member, which is what they would
-    // have got a millisecond later anyway.
-    membership = await Membership.create({
-      device: device._id,
-      user: req.userId,
-      role: 'member'
-    });
+    throw err;
   }
 
   return res.status(201).json({ device: deviceForMember(device, membership) });
+}
+
+// How hard somebody may guess. A claim code is six characters from a
+// 31-character alphabet - 887 million values, which is far too many to
+// type and not many at all to script.
+//
+// Only *failures* are charged (see forget() on the way out), so a
+// customer who fumbles their own code twice and then gets it right pays
+// nothing. Per account is the control that matters, because every claim
+// is made by a signed-in user and is therefore attributable; per code is
+// what stops one known code being hammered from a pool of accounts.
+const CLAIM_LIMIT_PER_ACCOUNT = { limit: 10, windowMs: 10 * 60 * 1000 };
+const CLAIM_LIMIT_PER_CODE = { limit: 5, windowMs: 60 * 60 * 1000 };
+
+/**
+ * Claim a doorbell with the one-time code on the unit - the only way to
+ * become an owner of hardware.
+ *
+ * Consumed by the first success, and the consequence is worth stating
+ * rather than discovering: a doorbell that changes hands needs the seller
+ * to release it, or support to re-mint the code. A permanent code has no
+ * such friction, which is exactly why it is unsafe. Releasing a device is
+ * an app feature; a stranger watching a door is not a feature.
+ */
+export async function claimDevice(req, res) {
+  // Mirrors mediaConfigured / storageConfigured: a missing key is a
+  // deployment fact, answered as one. Failing closed matters here - the
+  // alternative fallback would be an unkeyed hash, which is a weaker
+  // secret silently substituted for a stronger one.
+  if (!claimCodeConfigured) {
+    return res.status(503).json({ error: 'Claiming is not configured on this server' });
+  }
+
+  const claimCode = normalizeClaimCode(req.body?.claimCode);
+  if (!isValidClaimCode(claimCode)) {
+    // The format is public - it is printed on the box - so saying it is
+    // malformed reveals nothing, and it saves a rate-limit slot for a
+    // guess that could never have worked.
+    return res.status(400).json({ error: 'A claim code is six letters and numbers' });
+  }
+
+  // Hashed before it is used as a bucket key as well as a lookup key, so
+  // a process dump does not hold a list of recently guessed plaintext
+  // codes.
+  const claimCodeHash = hashClaimCode(claimCode);
+
+  const perAccount = consume('claim:account', String(req.userId), CLAIM_LIMIT_PER_ACCOUNT);
+  const perCode = consume('claim:code', claimCodeHash, CLAIM_LIMIT_PER_CODE);
+  if (!perAccount.allowed || !perCode.allowed) {
+    const retryAfterMs = Math.max(perAccount.retryAfterMs, perCode.retryAfterMs);
+    res.set('Retry-After', String(Math.ceil(retryAfterMs / 1000)));
+    return res.status(429).json({ error: 'Too many attempts. Try again in a few minutes.' });
+  }
+
+  const device = await Device.findOne({ claimCodeHash });
+  if (!device) {
+    return res.status(404).json({ error: 'No doorbell found with that code' });
+  }
+
+  // Already spent. The hash is deliberately *not* cleared when a code is
+  // consumed, and this is why: clearing it would make the second person
+  // holding the same photograph get "no doorbell found with that code",
+  // which is misleading in exactly the situation where the truth is worth
+  // telling. The hash is keyed, so keeping it costs nothing.
+  if (device.claimedAt) {
+    return res.status(409).json({
+      error:
+        'That code has already been used. Ask whoever set the doorbell up to share it with you.'
+    });
+  }
+
+  const existing = await Membership.findOne({ device: device._id, user: req.userId });
+  if (existing) {
+    forget('claim:account', String(req.userId));
+    return res.json({ device: deviceForMember(device, existing), alreadyMember: true });
+  }
+
+  // Belt and braces beside claimedAt. The two can only disagree if a
+  // claim was rolled back after its membership landed, or if an operator
+  // cleared claimedAt by hand - but the unique owner index would turn
+  // that into a duplicate-key 500, and "already set up" is the true
+  // answer rather than "something went wrong on the server".
+  if (await Membership.exists({ device: device._id, role: 'owner' })) {
+    return res.status(409).json({
+      error: 'That doorbell is already set up. Ask its owner to share it with you.'
+    });
+  }
+
+  /**
+   * Spend the code first, then take ownership - and the order is the
+   * whole of the concurrency story.
+   *
+   * This is a conditional update, so two people submitting the same code
+   * in the same instant cannot both pass it: one gets the document back,
+   * the other gets null and a 409. Doing it the other way round - create
+   * the membership, then spend the code - would leave a window where the
+   * doorbell has an owner and a live claim code, and the loser of that
+   * race would collide on the owner index and fall through to becoming a
+   * *member*. A stranger with a photograph would get ongoing access as a
+   * consolation prize.
+   */
+  const claimed = await Device.findOneAndUpdate(
+    { _id: device._id, claimedAt: null },
+    { $set: { claimedAt: new Date() } },
+    { new: true }
+  );
+  if (!claimed) {
+    return res.status(409).json({ error: 'That code has already been used' });
+  }
+
+  let membership;
+  try {
+    membership = await Membership.create({
+      device: claimed._id,
+      user: req.userId,
+      role: 'owner'
+    });
+  } catch (err) {
+    // The code is spent and nobody owns the doorbell, which is a state
+    // only support can get out of. So put it back. Re-running the claim
+    // is then just a retry.
+    await Device.updateOne({ _id: claimed._id }, { $set: { claimedAt: null } }).catch(() => {});
+    throw err;
+  }
+
+  forget('claim:account', String(req.userId));
+  forget('claim:code', claimCodeHash);
+
+  return res.status(201).json({ device: deviceForMember(claimed, membership) });
+}
+
+/**
+ * Mint or rotate this doorbell's share code. Owner only.
+ *
+ * On demand rather than at birth, because a code that exists is a code
+ * that can leak, and most doorbells are never shared with anyone. Calling
+ * this again rotates: whoever held the old one can no longer join, which
+ * together with removeMember is how an owner takes access back from
+ * somebody who has already used it.
+ */
+export async function createShareCode(req, res) {
+  const { device } = req;
+
+  // Random, so a collision is possible even if vanishingly unlikely. The
+  // unique index is the real guarantee; this loop turns a
+  // one-in-a-million duplicate key into a retry instead of a 500.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    device.shareCode = generateShareCode();
+    try {
+      await device.save();
+      return res.json({ device: deviceForMember(device, req.membership) });
+    } catch (err) {
+      if (err.code === 11000 && err.keyPattern?.shareCode) continue;
+      throw err;
+    }
+  }
+
+  return res.status(503).json({ error: 'Could not allocate a share code, please try again' });
+}
+
+/**
+ * Revoke it. Owner only.
+ *
+ * $unset rather than a sentinel value, so the partial unique index stops
+ * indexing this document entirely - every doorbell with no share code
+ * would otherwise collide with every other on whatever the sentinel was.
+ *
+ * Note what this does and does not do: it stops *new* people joining. It
+ * does not remove anybody who already joined, because a code and a
+ * membership are different things - use removeMember for that.
+ */
+export async function revokeShareCode(req, res) {
+  const { device } = req;
+
+  await Device.updateOne({ _id: device._id }, { $unset: { shareCode: 1 } });
+  // Mirrored onto the loaded document so the response is the device as it
+  // now is, rather than as it was a line ago.
+  device.shareCode = undefined;
+
+  return res.json({ device: deviceForMember(device, req.membership) });
 }
 
 export async function updateDevice(req, res) {
@@ -266,6 +464,19 @@ export async function deleteDevice(req, res) {
   await Event.deleteMany({ device: deviceId });
   await Membership.deleteMany({ device: deviceId });
   await Device.deleteOne({ _id: deviceId });
+
+  // Tell the hardware, and only now that the record is actually gone -
+  // closing first would leave a window in which the doorbell reconnects
+  // and re-registers against a device we are halfway through deleting.
+  //
+  // This is the one refusal in the system that is genuinely permanent, so
+  // it is the one place the device is closed with 4002 unprompted: the
+  // credential will never authenticate again, and a doorbell that is
+  // never told keeps a socket open to a server that 401s its every call.
+  // No fault LED, no reconnect, nothing at the house to suggest anything
+  // is wrong. Which is also why deleting deserves a confirmation that
+  // says what it does to the unit on the wall.
+  disconnectHardware(String(deviceId), 'This doorbell was deleted');
 
   return res.status(204).end();
 }

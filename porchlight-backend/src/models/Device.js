@@ -24,10 +24,25 @@ const deviceSchema = new mongoose.Schema(
     // It belongs to the signaling layer. `lastContactAt` below is the
     // honest thing this layer can say.
     connected: { type: Boolean, default: false },
-    // The code another user types to join this device. Unique index is
-    // what actually guarantees no two devices share one; see
-    // utils/shareCode.js for why the alphabet excludes 0/O and 1/I/L.
-    shareCode: { type: String, required: true, unique: true, index: true },
+    // The code another user types to join this device - a flatmate, a
+    // neighbour, someone who feeds the cat.
+    //
+    // Optional, and that is the A6 change: a share code is no longer a
+    // factory artifact. It used to be minted with the hardware and
+    // printed alongside the credential, which made the code that grants
+    // permanent access to a camera something anyone could read off the
+    // back of a case. Now the owner generates one inside the app when
+    // they actually want to share, revokes it by unsetting this, and
+    // rotates it by generating another. Nothing prints it.
+    //
+    // The one-time code that ships on the hardware is claimCodeHash
+    // below, and the two must never be conflated - see
+    // utils/claimCode.js for what that would cost.
+    //
+    // Uniqueness is a partial index rather than `unique: true` here, for
+    // the reason spelled out under deviceId: a plain unique index
+    // collides on the *second* device with no share code.
+    shareCode: { type: String, default: undefined },
 
     // --- Hardware identity ---------------------------------------------
     //
@@ -59,7 +74,26 @@ const deviceSchema = new mongoose.Schema(
     // named lastSeenAt: Membership.lastSeenAt is a *person's* read
     // watermark, and two fields with one name across two collections is
     // how the wrong one ends up in a query.
-    lastContactAt: { type: Date, default: null }
+    lastContactAt: { type: Date, default: null },
+
+    // --- Claiming -------------------------------------------------------
+    //
+    // The one-time code that turns a boxed doorbell into somebody's
+    // doorbell. Generated at mint time, printed on the sticker, shown on
+    // the setup page, and consumed by the first successful claim.
+    //
+    // Keyed hash, not a bare digest: a six-character code has about
+    // thirty bits in it, so an unsalted SHA-256 column is readable
+    // straight out of a database dump by anyone willing to spend a minute
+    // on it. utils/claimCode.js has the full argument.
+    claimCodeHash: { type: String, default: null },
+
+    // When the code was spent. Non-null is what makes a second person
+    // holding the same photograph get "that code has already been used"
+    // rather than a second membership. Kept rather than just clearing the
+    // hash, because "already claimed" and "never had a code" want
+    // different answers, and support needs to know which happened.
+    claimedAt: { type: Date, default: null }
   },
   { timestamps: true }
 );
@@ -74,6 +108,53 @@ deviceSchema.index(
   { unique: true, partialFilterExpression: { deviceId: { $type: 'string' } } }
 );
 
+// Same shape, same reason. A share code is now absent on most devices -
+// every doorbell nobody has shared - so `unique: true` on the path would
+// fail on the second one of those.
+//
+// NOTE: this replaces a plain unique index that older deployments still
+// carry. Mongo will not redefine `shareCode_1` in place, so the old one
+// has to be dropped first: scripts/migrate-claim-codes.mjs does that.
+deviceSchema.index(
+  { shareCode: 1 },
+  { unique: true, partialFilterExpression: { shareCode: { $type: 'string' } } }
+);
+
+// The claim lookup. Unique so that two devices minted with the same
+// random code is a duplicate-key error the mint retries, rather than two
+// doorbells one code can claim - the index is the guarantee, the 887
+// million values only make it rare.
+deviceSchema.index(
+  { claimCodeHash: 1 },
+  { unique: true, partialFilterExpression: { claimCodeHash: { $type: 'string' } } }
+);
+
+/**
+ * Four states, because `connected` is a boolean and a doorbell that has
+ * never been plugged in looks exactly like one that is unplugged.
+ *
+ * That distinction is the whole of what a customer stares at during
+ * setup. They type a claim code and then watch a screen until something
+ * changes, and `connected: false` cannot tell *it has not been plugged in
+ * yet* from *it was, and something went wrong* - which are the two
+ * halves of that wait, and have completely different next actions.
+ *
+ *   unprovisioned    no hardware exists for this doorbell    mint one
+ *   never-connected  provisioned, has never reported in      check power and wi-fi,
+ *                                                           check the card got the
+ *                                                           right credential
+ *   offline          has reported in before, not now         wait, or check power
+ *   online           a socket is open right now              nothing
+ *
+ * Derived rather than stored: every input is already here, and a stored
+ * copy is a thing that can disagree with them.
+ */
+export function deviceStatus(device) {
+  if (!device.deviceId) return 'unprovisioned';
+  if (device.connected) return 'online';
+  return device.lastContactAt ? 'offline' : 'never-connected';
+}
+
 // Applies to every serialization path - res.json(), a populated
 // sub-document, an array - rather than relying on each controller to
 // remember. _id is kept deliberately: the frontend uses device._id.
@@ -86,6 +167,13 @@ deviceSchema.set('toJSON', {
   transform(doc, ret) {
     delete ret.__v;
     delete ret.credentialHash;
+    // Same rule as the credential: a hash of a secret is still a secret,
+    // and this one is short enough that handing it out would matter.
+    delete ret.claimCodeHash;
+    // Attached here, not in a controller, so it is on the device however
+    // the document reaches a response - and so a handler added later
+    // cannot serve a doorbell with no status on it.
+    ret.status = deviceStatus(doc);
     return ret;
   }
 });
