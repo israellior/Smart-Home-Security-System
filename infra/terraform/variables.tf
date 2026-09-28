@@ -20,6 +20,22 @@ variable "github_repository" {
   default     = "israellior/Smart-Home-Security-System"
 }
 
+# GitHub's OIDC subject names the owner and repository by name *and* by
+# immutable ID: repo:owner@<owner id>/name@<repo id>:environment:production.
+# The IDs are what make the trust unforgeable - rename or delete the repo
+# and recreate one with the same name, and the new one gets a new ID, so
+# its workflows cannot assume this role. Both are public:
+#   curl https://api.github.com/repos/<owner>/<name>  ->  .owner.id, .id
+variable "github_owner_id" {
+  type    = number
+  default = 272283128
+}
+
+variable "github_repository_id" {
+  type    = number
+  default = 1354714682
+}
+
 variable "alert_email" {
   description = "Receives budget alerts and Let's Encrypt expiry notices."
   type        = string
