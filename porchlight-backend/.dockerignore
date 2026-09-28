@@ -1,0 +1,14 @@
+# Everything the build context carries is sent to the builder, and
+# anything COPY'd by a careless glob ends up in an image pushed to a
+# registry. Secrets first.
+.env
+.env.*
+!.env.example
+porchlight.json
+cards/
+
+node_modules/
+*.code-workspace
+README.md
+Dockerfile
+.dockerignore

@@ -15,6 +15,13 @@ import { clipRoutes } from './routes/clipRoutes.js';
 export function createApp() {
   const app = express();
 
+  // In production every request arrives from Caddy on the same host, so
+  // without this req.ip is the proxy's address for everyone. Nothing keys
+  // on the IP today; this is so the first thing that does is not quietly
+  // treating the whole internet as one client. Exactly one hop: trusting
+  // more would let a client choose its own IP with X-Forwarded-For.
+  app.set('trust proxy', 1);
+
   app.use(cors({ origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173' }));
   app.use(express.json());
 

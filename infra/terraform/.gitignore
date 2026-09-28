@@ -1,0 +1,19 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+
+# Your real values. Not secret, but yours - the example is what's shared.
+terraform.tfvars
+
+# The Cloudflare API token, read into CLOUDFLARE_API_TOKEN at apply time.
+# A file rather than pasted into a terminal or a chat.
+cloudflare.token
+
+# .terraform.lock.hcl is NOT ignored: commit it, so CI and every machine
+# resolve exactly the same provider versions.
+*.tfplan
+tfplan
+plan.txt
+apply.txt

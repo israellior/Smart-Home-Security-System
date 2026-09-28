@@ -1,0 +1,118 @@
+# Builds the API image, ships it, and releases it on the production server.
+#
+# Runs on pushes to main that touch the backend or the server config, and
+# on demand. The frontend is not here: Cloudflare Pages builds it from the
+# same push on its own.
+#
+# There are no AWS keys in this repository's secrets. The job proves who
+# it is to AWS with an OIDC token GitHub mints for this run, and AWS only
+# accepts it from this repo's `production` environment (infra/terraform/iam.tf).
+# Everything under `vars.` is a plain environment variable, not a secret -
+# see the github_variables Terraform output.
+name: Deploy API
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - porchlight-backend/**
+      - infra/server/**
+      - .github/workflows/deploy-api.yml
+  workflow_dispatch:
+
+# One release at a time, and never cancel one halfway: a cancelled run
+# can leave the server between stop and start.
+concurrency:
+  group: deploy-api-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    # The server is Graviton. Building on an arm64 runner makes a native
+    # image with no emulation; these runners are free on public repos.
+    runs-on: ubuntu-24.04-arm
+    environment: production
+    permissions:
+      contents: read
+      id-token: write # the OIDC token AWS trades for credentials
+    env:
+      IMAGE: ${{ vars.ECR_REPOSITORY }}:${{ github.sha }}
+
+    steps:
+      # Third-party actions are pinned to a commit, not a tag. A tag can be
+      # moved to different code after the fact; a commit cannot, and this
+      # job holds credentials to production.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+
+      - name: Build and push the image
+        run: |
+          # Tags are immutable in ECR, so a re-run of the same commit finds
+          # its image already there. Reuse it rather than fail the push.
+          if aws ecr describe-images --repository-name porchlight-api \
+               --image-ids imageTag="$GITHUB_SHA" > /dev/null 2>&1; then
+            echo "Image for $GITHUB_SHA already in ECR - reusing it"
+            exit 0
+          fi
+          docker build --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            -t "$IMAGE" porchlight-backend
+          docker push "$IMAGE"
+
+      - name: Upload the release bundle
+        run: |
+          tar -czf release.tgz -C infra/server .
+          aws s3 cp release.tgz "s3://${{ vars.RELEASE_BUCKET }}/releases/$GITHUB_SHA.tgz"
+
+      - name: Release on the server
+        env:
+          INSTANCE_ID: ${{ vars.INSTANCE_ID }}
+          BUCKET: ${{ vars.RELEASE_BUCKET }}
+        run: |
+          DIR="/opt/porchlight/releases/$GITHUB_SHA"
+          # What the server runs, as root, via SSM. It fetches its own
+          # bundle, so nothing about the server is ever edited by hand.
+          SCRIPT=$(cat <<EOF
+          set -euo pipefail
+          rm -rf "$DIR" && mkdir -p "$DIR"
+          aws s3 cp "s3://$BUCKET/releases/$GITHUB_SHA.tgz" - | tar -xz -C "$DIR"
+          bash "$DIR/deploy.sh" "$IMAGE"
+          ls -1dt /opt/porchlight/releases/* | tail -n +6 | xargs -r rm -rf
+          EOF
+          )
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --comment "deploy ${GITHUB_SHA::12}" \
+            --timeout-seconds 120 \
+            --parameters "$(jq -n --arg s "$SCRIPT" '{commands: [$s], executionTimeout: ["600"]}')" \
+            --query Command.CommandId --output text)
+          echo "SSM command $COMMAND_ID"
+
+          # Polled by hand: the CLI's built-in waiter gives up after 100s,
+          # and a release that has to ride out Atlas retries can take longer.
+          for _ in $(seq 1 130); do
+            STATUS=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" \
+              --instance-id "$INSTANCE_ID" --query Status --output text 2>/dev/null || echo Pending)
+            case "$STATUS" in Pending|InProgress|Delayed) sleep 5 ;; *) break ;; esac
+          done
+
+          aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
+            --query '[StandardOutputContent, StandardErrorContent]' --output text
+          echo "Final status: $STATUS"
+          [ "$STATUS" = "Success" ]
+
+      - name: Check it from the outside
+        run: |
+          # The server said it is healthy; this checks the whole path a
+          # doorbell takes - DNS, TLS, Caddy, the API.
+          curl -fsS --retry 5 --retry-delay 3 --retry-all-errors "${{ vars.API_URL }}/api/health"

@@ -1,2 +1,10 @@
 node_modules/
 .env
+
+# Birth certificates from scripts/mint-device.mjs. Each one holds a live
+# device credential and an unused claim code, and this repo is public.
+porchlight.json
+cards/
+
+# Personal editor workspaces - they point at folders on one machine.
+*.code-workspace
