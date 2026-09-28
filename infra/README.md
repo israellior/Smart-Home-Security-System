@@ -160,22 +160,31 @@ sticker. The script refuses to overwrite it without `--force`.
 - **Environment variables**: one per key in `terraform output
   github_variables`.
 
-### 8. Cloudflare Pages (the frontend)
+### 8. Cloudflare Workers (the frontend)
 
-*Workers & Pages → Create → Pages → Connect to Git* → this repo:
+The React app is served as static assets from a Cloudflare Worker,
+configured by `wrangler.jsonc` at the repo root. (Cloudflare Pages still
+works but is now its "legacy" workflow.)
+
+*Workers & Pages → Create application → **Connect GitHub*** → this repo
+(grant access to this repository only):
 
 | Setting | Value |
 |---|---|
-| Production branch | `main` |
+| Project name | `porchlight` (must match `name` in `wrangler.jsonc`) |
 | Build command | `npm run build` |
-| Output directory | `dist` |
-| Environment variables | `VITE_API_URL` = `https://api.<domain>/api`, `NODE_VERSION` = `24` |
-| Build watch paths (exclude) | `porchlight-backend/*`, `infra/*` |
+| Deploy command | `npx wrangler deploy` |
+| Production branch | `main` |
+| Build variables | `VITE_API_URL` = `https://api.<domain>/api`, `NODE_VERSION` = `24` |
 
-Then *Custom domains* → add the apex `<domain>`. Pages creates the DNS
-record itself. Deep links such as `/devices/x` work without a redirects
-file: with no `404.html` in the build, Pages serves `index.html` for
-unknown paths.
+`VITE_API_URL` must be a **build** variable, not a runtime one: Vite
+bakes it into the bundle.
+
+Then *Settings → Domains & Routes → Add → Custom domain* → the apex
+`<domain>`. Cloudflare creates the DNS record. Under *Settings → Build*,
+set build watch paths to exclude `porchlight-backend/*` and `infra/*`.
+Deep links like `/devices/x` work because of `not_found_handling:
+"single-page-application"` in `wrangler.jsonc`.
 
 ### 9. First release
 

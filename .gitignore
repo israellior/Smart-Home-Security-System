@@ -9,3 +9,6 @@ dist-ssr/
 Thumbs.db
 *.log
 npm-debug.log*
+
+# Wrangler's local state (Cloudflare Workers CLI)
+.wrangler/
