@@ -6,7 +6,7 @@
   position: relative;
   width: 100%;
   aspect-ratio: 4 / 3; /* the camera's 640x480 - no letterboxing */
-  background: #0b0b0c;
+  background: var(--video-ground);
   border: 1px solid var(--line);
   border-radius: 10px;
   overflow: hidden;
@@ -37,10 +37,37 @@
   position: absolute;
   inset: 0;
   display: flex;
+  /* A column because this can now hold a message and a button under it -
+     the doorbell that was asked and did not answer. */
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: 16px;
   text-align: center;
+}
+
+/*
+ * The one button that lives inside the overlay, for the doorbell that was
+ * asked and did not answer. Deliberately not the same weight as the
+ * primary control below the stage: it sits on the video ground, which is
+ * dark in both themes, so it borrows the full-screen palette rather than
+ * whichever theme is showing.
+ */
+.overlayBtn {
+  margin-top: 12px;
+  padding: 8px 18px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--evening-ink);
+  background: transparent;
+  border: 1px solid var(--evening-line);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.overlayBtn:hover {
+  border-color: var(--evening-brass);
+  color: var(--evening-brass);
 }
 
 .hint {
@@ -71,7 +98,7 @@
   cursor: pointer;
   border: 1px solid var(--line);
   background: none;
-  color: var(--fg);
+  color: var(--ink);
 }
 
 .primary {
@@ -107,4 +134,93 @@
   color: var(--muted);
   margin: 8px 0 0;
   text-align: center;
+}
+
+/* The same slot as .note, in the alarm colour. A talk failure happens
+   while the session is up, so it has nowhere else to go - the overlay
+   that carries .error only exists before the video arrives. */
+.noteError {
+  composes: note;
+  color: var(--ember);
+}
+
+/*
+ * Full screen. Same component, same room - see LiveView.jsx - laid out
+ * to fill the viewport instead of sitting in the page.
+ *
+ * The overlay is the camera's black in either theme, so it carries the
+ * evening palette outright rather than the page's: day-porch ink and
+ * borders on this ground would be close to invisible.
+ */
+.full {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+
+  --bg: var(--evening-bg);
+  --panel: var(--evening-panel);
+  --ink: var(--evening-ink);
+  --muted: var(--evening-muted);
+  --brass: var(--evening-brass);
+  --brass-soft: var(--evening-brass-soft);
+  --ember: var(--evening-ember);
+  --line: var(--evening-line);
+
+  background: var(--video-ground);
+  color: var(--ink);
+}
+
+.stageFull {
+  flex: 1;
+  /* The screen's shape now, not the camera's. */
+  aspect-ratio: auto;
+  min-height: 0;
+  border: none;
+  border-radius: 0;
+}
+
+/* Inline the stage is already 4:3, so cover crops nothing. Full screen
+   it would crop hard - a phone in portrait is nowhere near the camera's
+   shape - and the cropped strip is exactly the part of a doorstep you
+   opened this to see. */
+.stageFull .video {
+  object-fit: contain;
+}
+
+.close {
+  position: absolute;
+  top: calc(12px + env(safe-area-inset-top));
+  right: 12px;
+  z-index: 1;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  font-size: 24px;
+  line-height: 1;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  /* Over the picture, so it needs its own ground to stay legible on a
+     bright frame. */
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  color: var(--ink);
+  cursor: pointer;
+  padding: 0;
+}
+
+.controlsFull {
+  width: 100%;
+  max-width: 420px;
+  margin: 0 auto;
+  padding: 14px 20px calc(6px + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+}
+
+.noteFull {
+  padding: 0 20px calc(16px + env(safe-area-inset-bottom));
 }

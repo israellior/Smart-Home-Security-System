@@ -4,18 +4,61 @@
  * rather than a generic light/dark swap. Components should only ever
  * reference these variables, never hardcode colors, so a future
  * feature automatically inherits the theme.
+ *
+ * Both palettes are also spelled out by name (--day-* / --evening-*),
+ * because a couple of surfaces need a specific one rather than
+ * "whatever is showing": the full screen live view is always evening,
+ * since it sits on the video's own black in either theme. And each
+ * theme aliases --flip-* to the palette that is *not* showing, for a
+ * surface that deliberately reads as the other theme - the Overview
+ * ring under the pointer. Keeping both of those here rather than in a
+ * component is what stops a third copy of the hex values appearing.
  */
 
 :root {
-  --bg: #EDE7DB;
-  --panel: #E3DBC8;
-  --ink: #1C1712;
-  --muted: #6B6153;
-  --brass: #A9762F;
-  --brass-soft: rgba(169, 118, 47, 0.16);
-  --moss: #5C7350;
-  --ember: #9C4A2E;
-  --line: rgba(28, 23, 18, 0.14);
+  --day-bg: #EDE7DB;
+  --day-panel: #E3DBC8;
+  --day-ink: #1C1712;
+  --day-muted: #6B6153;
+  --day-brass: #A9762F;
+  --day-brass-soft: rgba(169, 118, 47, 0.16);
+  --day-moss: #5C7350;
+  --day-ember: #9C4A2E;
+  --day-line: rgba(28, 23, 18, 0.14);
+
+  --evening-bg: #1C1712;
+  --evening-panel: #241C15;
+  --evening-ink: #EDE7DB;
+  --evening-muted: #B0A48F;
+  --evening-brass: #C9963E;
+  --evening-brass-soft: rgba(201, 150, 62, 0.16);
+  --evening-moss: #8FAE80;
+  --evening-ember: #C1603D;
+  --evening-line: rgba(237, 231, 219, 0.14);
+
+  --bg: var(--day-bg);
+  --panel: var(--day-panel);
+  --ink: var(--day-ink);
+  --muted: var(--day-muted);
+  --brass: var(--day-brass);
+  --brass-soft: var(--day-brass-soft);
+  --moss: var(--day-moss);
+  --ember: var(--day-ember);
+  --line: var(--day-line);
+
+  --flip-bg: var(--evening-bg);
+  --flip-panel: var(--evening-panel);
+  --flip-ink: var(--evening-ink);
+  --flip-muted: var(--evening-muted);
+  --flip-brass: var(--evening-brass);
+  --flip-brass-soft: var(--evening-brass-soft);
+  --flip-moss: var(--evening-moss);
+  --flip-ember: var(--evening-ember);
+  --flip-line: var(--evening-line);
+
+  /* The camera's own black, behind and around the picture. Not part of
+     either palette: a video frame sits on this in both themes. */
+  --video-ground: #0b0b0c;
 
   --font-display: "Fraunces", serif;
   --font-body: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
@@ -23,28 +66,48 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #1C1712;
-    --panel: #241C15;
-    --ink: #EDE7DB;
-    --muted: #B0A48F;
-    --brass: #C9963E;
-    --brass-soft: rgba(201, 150, 62, 0.16);
-    --moss: #8FAE80;
-    --ember: #C1603D;
-    --line: rgba(237, 231, 219, 0.14);
+    --bg: var(--evening-bg);
+    --panel: var(--evening-panel);
+    --ink: var(--evening-ink);
+    --muted: var(--evening-muted);
+    --brass: var(--evening-brass);
+    --brass-soft: var(--evening-brass-soft);
+    --moss: var(--evening-moss);
+    --ember: var(--evening-ember);
+    --line: var(--evening-line);
+
+    --flip-bg: var(--day-bg);
+    --flip-panel: var(--day-panel);
+    --flip-ink: var(--day-ink);
+    --flip-muted: var(--day-muted);
+    --flip-brass: var(--day-brass);
+    --flip-brass-soft: var(--day-brass-soft);
+    --flip-moss: var(--day-moss);
+    --flip-ember: var(--day-ember);
+    --flip-line: var(--day-line);
   }
 }
 
 :root[data-theme="dark"] {
-  --bg: #1C1712;
-  --panel: #241C15;
-  --ink: #EDE7DB;
-  --muted: #B0A48F;
-  --brass: #C9963E;
-  --brass-soft: rgba(201, 150, 62, 0.16);
-  --moss: #8FAE80;
-  --ember: #C1603D;
-  --line: rgba(237, 231, 219, 0.14);
+  --bg: var(--evening-bg);
+  --panel: var(--evening-panel);
+  --ink: var(--evening-ink);
+  --muted: var(--evening-muted);
+  --brass: var(--evening-brass);
+  --brass-soft: var(--evening-brass-soft);
+  --moss: var(--evening-moss);
+  --ember: var(--evening-ember);
+  --line: var(--evening-line);
+
+  --flip-bg: var(--day-bg);
+  --flip-panel: var(--day-panel);
+  --flip-ink: var(--day-ink);
+  --flip-muted: var(--day-muted);
+  --flip-brass: var(--day-brass);
+  --flip-brass-soft: var(--day-brass-soft);
+  --flip-moss: var(--day-moss);
+  --flip-ember: var(--day-ember);
+  --flip-line: var(--day-line);
 }
 
 * {

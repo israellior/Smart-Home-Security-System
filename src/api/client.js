@@ -37,6 +37,13 @@ export const api = {
   listDevices: (token) => request('/devices', { token }),
   getDevice: (token, id) => request(`/devices/${id}`, { token }),
   createDevice: (token, payload) => request('/devices', { method: 'POST', body: payload, token }),
+  // The two codes, and they are not interchangeable. /claim takes the
+  // one-time code on a new unit and makes you its owner; /join takes a
+  // code an owner generated in the app and makes you a member. The server
+  // keeps them apart for a reason - see utils/claimCode.js there - so the
+  // client does too, rather than posting to one endpoint with a flag.
+  claimDevice: (token, claimCode) =>
+    request('/devices/claim', { method: 'POST', body: { claimCode }, token }),
   joinDevice: (token, shareCode) =>
     request('/devices/join', { method: 'POST', body: { shareCode }, token }),
   updateDevice: (token, id, patch) =>
@@ -47,6 +54,14 @@ export const api = {
     request(`/devices/${id}/preferences`, { method: 'PATCH', body: prefs, token }),
   markSeen: (token, id) => request(`/devices/${id}/seen`, { method: 'POST', token }),
   deleteDevice: (token, id) => request(`/devices/${id}`, { method: 'DELETE', token }),
+
+  // Share codes are made and unmade on demand now, rather than existing
+  // from the moment a doorbell does. Calling create again rotates the
+  // code, which is how an owner locks out somebody who has the old one.
+  createShareCode: (token, id) =>
+    request(`/devices/${id}/share-code`, { method: 'POST', token }),
+  revokeShareCode: (token, id) =>
+    request(`/devices/${id}/share-code`, { method: 'DELETE', token }),
 
   listMembers: (token, id) => request(`/devices/${id}/members`, { token }),
   removeMember: (token, id, userId) =>

@@ -141,9 +141,46 @@
   flex-shrink: 0;
 }
 
-.statusDot.connected {
+/*
+ * Four states, not two. A doorbell that has never been plugged in and one
+ * that is unplugged used to share this dot, and they are the two halves of
+ * setup - the person staring at this row wants to know which they are in.
+ *
+ * `idle` is the default above: no hardware paired, so nothing is wrong and
+ * the dot stays quiet.
+ */
+.statusDot.online {
   background: var(--moss);
   opacity: 1;
+}
+
+.statusDot.problem {
+  background: var(--ember);
+  opacity: 1;
+}
+
+.statusDot.waiting {
+  background: var(--brass);
+  opacity: 1;
+  animation: waitingPulse 2.4s ease-in-out infinite;
+}
+
+/* Setup is a wait with an end, so the dot says "still going" rather than
+   sitting there looking like a settled state. */
+@keyframes waitingPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .statusDot.waiting {
+    animation: none;
+  }
 }
 
 .deviceText {
@@ -161,16 +198,6 @@
 .deviceMeta {
   font-size: 13px;
   color: var(--muted);
-}
-
-.newBadge {
-  font-size: 12px;
-  color: var(--bg);
-  background: var(--brass);
-  border-radius: 999px;
-  padding: 2px 9px;
-  flex-shrink: 0;
-  font-variant-numeric: tabular-nums;
 }
 
 .chevron {

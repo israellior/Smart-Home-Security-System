@@ -1,7 +1,10 @@
+import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useDevices } from '../context/DevicesContext';
 import { GlowIcon } from '../components/GlowIcon';
+import { NewBadge } from '../components/NewBadge';
+import { deviceStatus, statusLabel, statusTone } from '../lib/deviceStatus';
 import styles from './Home.module.css';
 
 /**
@@ -30,7 +33,14 @@ function firstName(name) {
  */
 export function Home() {
   const { user } = useAuth();
-  const { devices, loading, error } = useDevices();
+  const { devices, loading, error, refresh } = useDevices();
+
+  // This page is mostly a list of numbers that age, so it re-reads them
+  // on arrival. A no-op on the very first paint, where the provider's own
+  // load is already on its way.
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const hasDevices = devices.length > 0;
   const totalNew = devices.reduce((sum, device) => sum + (device.newEventCount || 0), 0);
@@ -77,32 +87,29 @@ export function Home() {
 
       {!loading &&
         !error &&
-        devices.map((device) => (
+        devices.map((device) => {
+          // No socket on this screen - it would mean one per row, for a
+          // list somebody looks at for two seconds - so this is the
+          // stored status, which is what the list was fetched for.
+          const status = deviceStatus(device);
+          return (
           <Link key={device._id} className={styles.deviceRow} to={`/devices/${device._id}`}>
-            <span
-              className={`${styles.statusDot} ${device.connected ? styles.connected : ''}`}
-            />
+            <span className={`${styles.statusDot} ${styles[statusTone(status)]}`} />
             <span className={styles.deviceText}>
               <span className={styles.deviceName}>{device.name}</span>
               <span className={styles.deviceMeta}>
-                {device.connected ? 'Connected' : 'Not connected'}
+                {statusLabel(status)}
                 {device.location && ` · ${device.location}`}
                 {device.role === 'member' && ' · Shared with you'}
               </span>
             </span>
-            {device.newEventCount > 0 && (
-              <span
-                className={styles.newBadge}
-                title={`${device.newEventCount} new since you last looked`}
-              >
-                {device.newEventCount > 99 ? '99+' : device.newEventCount}
-              </span>
-            )}
+            <NewBadge count={device.newEventCount} context="since you last looked" />
             <span className={styles.chevron} aria-hidden="true">
               ›
             </span>
           </Link>
-        ))}
+          );
+        })}
 
       {!loading && !error && (
         <Link className={styles.addDevice} to="/devices/new">
