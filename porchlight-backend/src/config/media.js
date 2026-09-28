@@ -68,10 +68,17 @@ const GRANTS = {
     identity: (deviceId) => `device:${deviceId}:sub`,
     grant: { canPublish: false, canSubscribe: true, canPublishData: false }
   },
+  // Every human joins as this, and stays this. The talk floor is granted
+  // on the live session by setCanTalk() below, never by a token - so a
+  // viewer token showing canPublish:false is the system working, not a
+  // missing grant.
   viewer: {
     identity: (deviceId, userId) => `user:${userId}`,
     grant: { canPublish: false, canSubscribe: true, canPublishData: false }
   },
+  // Nothing mints this. Kept as the statement of what holding the floor
+  // means - setCanTalk() sets exactly these publish rights on a live
+  // participant, and the two must not drift apart.
   talker: {
     identity: (deviceId, userId) => `user:${userId}`,
     grant: {
@@ -84,6 +91,24 @@ const GRANTS = {
 };
 
 export const MEDIA_TOKEN_KINDS = Object.keys(GRANTS);
+
+/**
+ * The identity the doorbell's camera publishes under.
+ *
+ * Exported because the viewer needs to know what to wait for, and it must
+ * be this definition rather than a string the frontend assembles itself -
+ * the two drifting apart would present as a live view that spins forever
+ * on a call that is working perfectly.
+ *
+ * The Pi joins the room TWICE. `device:<id>:pub` publishes the camera and
+ * `device:<id>:sub` exists only to hear viewers and publishes nothing,
+ * ever. A UI waiting for every remote participant to publish waits
+ * forever; a UI counting participants sees two and concludes the camera
+ * has arrived before it has.
+ */
+export function publisherIdentity(deviceId) {
+  return GRANTS.publisher.identity(deviceId);
+}
 
 /**
  * The one place a media token is made.
@@ -171,6 +196,12 @@ export async function checkClockSkew() {
  * connection every time somebody pressed a button - seconds of dead air
  * in the middle of a conversation. This flips the permission on the
  * session that is already up.
+ *
+ * Which is why a viewer's *token* never carries a publish grant and a
+ * correctly working system still decodes as canPublish:false. Do not
+ * read a token to find out whether someone may speak - read this.
+ *
+ * Granting throws on failure and revoking does not. See below.
  */
 const roomService = mediaConfigured
   ? new RoomServiceClient(LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
@@ -190,12 +221,25 @@ export async function setCanTalk(deviceId, userId, canTalk) {
     await roomService.updateParticipant(roomName(deviceId), `user:${userId}`, undefined, permission);
     return true;
   } catch (err) {
-    // Not being in the room is the ordinary case, not a failure: a
-    // viewer who closed their laptop still holds the floor in our state
-    // until someone else takes it, and revoking them then is a no-op.
-    // Treated as "nothing to change" so releasing a floor can never fail
-    // in a way that wedges it.
-    console.warn(`Could not set talk permission for user:${userId} on ${deviceId}: ${err.message}`);
-    return false;
+    // The two directions fail differently, and treating them the same
+    // was hiding a real fault.
+    //
+    // Revoking is allowed to fail quietly. Not being in the room is the
+    // ordinary case: a viewer who closed their laptop still holds the
+    // floor in our state until someone else takes it, and revoking them
+    // then is a no-op. Swallowing it is what keeps releasing a floor
+    // from ever failing in a way that wedges it.
+    if (!canTalk) {
+      console.warn(`Could not revoke talk permission for user:${userId} on ${deviceId}: ${err.message}`);
+      return false;
+    }
+
+    // Granting is the opposite. If this call did not land the viewer is
+    // still canPublish:false, and reporting success lets the browser go
+    // on to publish into a permission it does not have - LiveKit refuses
+    // with a 403 that nothing but the browser console ever sees. The
+    // symptom is a talk button that does nothing, which is the hardest
+    // kind of bug to find and the easiest one to report properly.
+    throw new Error(`LiveKit would not grant the microphone: ${err.message}`);
   }
 }

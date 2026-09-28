@@ -1,6 +1,6 @@
-import { mediaConfigured, mintMediaToken } from '../config/media.js';
+import { mediaConfigured, mintMediaToken, publisherIdentity } from '../config/media.js';
 import { takeFloor, releaseFloor, whoIsTalking } from '../services/media/talkFloor.js';
-import { requestViewer } from '../signaling/index.js';
+import { requestViewer, noteWatchIntent } from '../signaling/index.js';
 import { isDeviceOnline } from '../signaling/registry.js';
 
 /**
@@ -24,6 +24,22 @@ function unavailable(res) {
  * parameter is a thing that can be passed wrong, and these two have
  * deliberately different rights. There is no path through the publisher
  * endpoint that mints a subscriber.
+ */
+/**
+ * No presence check on either of these, and that is deliberate - leave it
+ * that way.
+ *
+ * The media script has no signaling socket to us and never did. A call can
+ * be running, and reconnecting to LiveKit with a fresh token per attempt,
+ * during a window where the daemon's socket is down and isDeviceOnline is
+ * false. A presence check here would turn a recoverable wobble into a dead
+ * call.
+ *
+ * Which also makes these the only device-authenticated traffic during a
+ * reconnect, so they are where a clock problem shows up first: every token
+ * carries nbf = mint time, and a server clock a minute ahead of LiveKit's
+ * makes every one of them not-yet-valid with every endpoint still
+ * returning 200. See checkClockSkew in config/media.js.
  */
 export async function getPublisherToken(req, res) {
   if (!mediaConfigured) return unavailable(res);
@@ -61,13 +77,37 @@ export async function getViewerToken(req, res) {
   // may already be in the room, so a failure to deliver it is reported,
   // not thrown.
   const online = isDeviceOnline(deviceKey);
-  if (online) requestViewer(deviceKey, req.userId);
+  if (online) {
+    requestViewer(deviceKey, req.userId);
+  } else {
+    // Held for thirty seconds and replayed when the doorbell says hello.
+    // This is the entry point that matters for it: the browser's own
+    // socket sends `watch` only when the live view is already open,
+    // whereas asking for a token is what the app does when somebody
+    // presses the button - including from a page whose socket is down.
+    //
+    // A doorbell whose bridge is mid-backoff is typically back in a second
+    // or two, so the usual outcome of this line is a call that starts on
+    // its own and a viewer who never learns anything went wrong.
+    noteWatchIntent(deviceKey, req.userId);
+  }
 
   return res.json({
     ...grant,
     // So the UI can say "your doorbell is offline" instead of showing a
     // black rectangle and letting the viewer conclude it is broken.
     deviceOnline: online,
+    // What the viewer has to wait for, and the reason it is sent rather
+    // than assembled in the browser.
+    //
+    // `deviceOnline: true` is not a promise that a call will start.
+    // requestViewer reports whether the frame was written to a socket; it
+    // cannot report whether anything read it, and between a doorbell
+    // losing power and the heartbeat noticing there is up to thirty
+    // seconds in which that write succeeds into a socket with nobody on
+    // the other end. So the UI keys "live" on this participant appearing
+    // or a video track arriving - never on the token it already holds.
+    publisherIdentity: publisherIdentity(device.deviceId),
     talkingUserId: whoIsTalking(deviceKey)
   });
 }
@@ -79,6 +119,10 @@ export async function getViewerToken(req, res) {
  *
  * Permissions change on the session that is already up rather than
  * through a new token, so pressing the button does not cost a reconnect.
+ *
+ * A 200 here means the viewer really may publish now. If the grant did
+ * not land this answers 502 and leaves the floor free, because the
+ * browser treats success as permission to open the microphone.
  */
 export async function takeTalk(req, res) {
   if (!mediaConfigured) return unavailable(res);
@@ -87,7 +131,19 @@ export async function takeTalk(req, res) {
     return res.status(409).json({ error: 'No hardware is provisioned for this doorbell yet' });
   }
 
-  const result = await takeFloor(String(device._id), device.deviceId, req.userId);
+  let result;
+  try {
+    result = await takeFloor(String(device._id), device.deviceId, req.userId);
+  } catch (err) {
+    // Caught here rather than left to the central handler, which reports
+    // every error as the same generic 500. The browser is about to try
+    // to publish on the strength of this response, so it needs to be
+    // told what went wrong - a talk button that fails silently is how
+    // this went unnoticed in the first place.
+    console.error(`Talk floor grant failed on ${device.deviceId}:`, err.message);
+    return res.status(502).json({ error: err.message });
+  }
+
   return res.json({ talkingUserId: result.userId, alreadyHeld: result.alreadyHeld });
 }
 

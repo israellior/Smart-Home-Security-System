@@ -68,6 +68,12 @@ export async function takeFloor(deviceKey, deviceId, userId) {
   if (held) await setCanTalk(deviceId, held.userId, false);
   clear(deviceKey);
 
+  // Throws if the grant did not land, which leaves the floor held by
+  // nobody - the previous holder has already been revoked and this one
+  // never gets recorded. That is the right place to fail: an empty floor
+  // is one the next press can take, whereas recording this viewer as the
+  // holder would have blocked everyone else for the full TTL while the
+  // one person "holding" it had no microphone.
   await setCanTalk(deviceId, userId, true);
   floors.set(deviceKey, {
     userId,
@@ -100,5 +106,28 @@ export function releaseIfHeld(deviceKey, userId) {
   if (floors.get(deviceKey)?.userId !== userId) return;
   releaseFloor(deviceKey, userId).catch((err) => {
     console.error(`Could not release talk floor for ${userId}:`, err.message);
+  });
+}
+
+/**
+ * Drops the floor whoever is holding it, because the call itself is over.
+ *
+ * Called when the *doorbell* goes, which is the other way a turn ends and
+ * the one that used to leak. A viewer closing a tab releases their own
+ * floor through releaseIfHeld; a doorbell dropping mid-call released
+ * nothing, so the floor stayed held by whoever had it - through the
+ * device's whole reconnect and long after the call was over, blocking
+ * everyone else for the full TTL.
+ *
+ * Separate from releaseIfHeld because the caller genuinely does not know
+ * or care who was talking: there is nobody left to talk to. Naming a user
+ * id just to satisfy the signature is how the two callers would end up
+ * looking like they were doing the same thing.
+ */
+export function releaseWhoeverHolds(deviceKey) {
+  const held = floors.get(deviceKey);
+  if (!held) return;
+  releaseFloor(deviceKey, held.userId).catch((err) => {
+    console.error(`Could not release talk floor on ${deviceKey}:`, err.message);
   });
 }
