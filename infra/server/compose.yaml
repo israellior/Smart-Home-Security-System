@@ -1,0 +1,55 @@
+# What runs on the server. Copied to /opt/porchlight by deploy.sh, which
+# also writes the three files this reads: .env (IMAGE, AWS_REGION,
+# LOG_GROUP - for the ${...} below), app.env and proxy.env.
+name: porchlight
+
+services:
+  api:
+    image: ${IMAGE:?deploy.sh sets IMAGE}
+    env_file: app.env
+    environment:
+      PORT: "4000"
+    # Not published. Only Caddy reaches it, over the compose network, so
+    # nothing on the internet can talk to Node without going through TLS.
+    expose:
+      - "4000"
+    # A real init as PID 1: forwards SIGTERM to Node and reaps zombies.
+    init: true
+    stop_grace_period: 10s
+    restart: unless-stopped
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION}
+        awslogs-group: ${LOG_GROUP}
+        awslogs-create-group: "false"
+        tag: "api/{{.ID}}"
+
+  caddy:
+    image: caddy:2.11-alpine
+    env_file: proxy.env
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # The certificates. A named volume outlives every release, so a
+      # deploy never asks Let's Encrypt for a new one - their rate limits
+      # are per week and a bad day of redeploys would exhaust them.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+    restart: unless-stopped
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION}
+        awslogs-group: ${LOG_GROUP}
+        awslogs-create-group: "false"
+        tag: "caddy/{{.ID}}"
+
+volumes:
+  caddy_data:
+  caddy_config:

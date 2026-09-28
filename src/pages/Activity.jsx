@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useDevices } from '../context/DevicesContext';
 import { useDevice, useDeviceLive } from '../components/DeviceLayout';
+import { NewBadge } from '../components/NewBadge';
 import { api } from '../api/client';
 import styles from './Activity.module.css';
 
@@ -52,7 +53,7 @@ function mergeEvent(list, incoming) {
 
 export function Activity() {
   const { token } = useAuth();
-  const { markSeen } = useDevices();
+  const { markSeen, beginReading } = useDevices();
   const device = useDevice();
   const { lastEvent } = useDeviceLive();
   const deviceId = device._id;
@@ -101,6 +102,14 @@ export function Activity() {
   useEffect(() => {
     markSeen(deviceId);
   }, [deviceId, markSeen]);
+
+  // And it keeps meaning that for as long as the page is open. Without
+  // this, a press that arrives while you are reading the list lands in
+  // front of you and *also* raises a badge on the tab you are already on,
+  // and still counts as unread on the doorbell list afterwards. Saying so
+  // here rather than acting on it is deliberate: DevicesContext owns what
+  // happens next, so the badge and the watermark cannot disagree.
+  useEffect(() => beginReading(deviceId), [beginReading, deviceId]);
 
   // A doorbell press while this page is open appears without a refresh.
   // The frozen watermark above means it lands under "New", which is the
@@ -209,7 +218,7 @@ export function Activity() {
             <>
               <p className={styles.sectionLabel}>
                 New
-                <span className={styles.newCount}>{newEvents.length}</span>
+                <NewBadge count={newEvents.length} />
               </p>
               <div>{newEvents.map((event) => renderRow(event, true))}</div>
             </>

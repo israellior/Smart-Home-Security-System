@@ -1,4 +1,9 @@
 .sectionLabel {
+  /* Carries a NewBadge or the "Preview" tag, so it lays them out on its
+     own baseline the same way the tabs and the crumb do. */
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 13px;
   color: var(--muted);
   margin: 24px 0 4px;
@@ -52,14 +57,6 @@
   margin-left: -14px;
 }
 
-.newCount {
-  font-size: 11px;
-  color: var(--bg);
-  background: var(--brass);
-  border-radius: 999px;
-  padding: 2px 8px;
-  margin-left: 8px;
-}
 
 .loading {
   padding: 40px 0;

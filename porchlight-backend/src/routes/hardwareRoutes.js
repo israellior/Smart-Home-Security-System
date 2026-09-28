@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { getHardwareSelf } from '../controllers/hardwareController.js';
+import { getPublisherToken, getListenerToken } from '../controllers/mediaController.js';
 import { requireDevice } from '../middleware/deviceAuth.js';
 
 /**
@@ -22,5 +23,11 @@ export const hardwareRoutes = Router();
 
 hardwareRoutes.get('/:deviceId/self', requireDevice, getHardwareSelf);
 
-// Media token endpoints (publisher and listener) mount here too, on the
-// same requireDevice, once LiveKit lands. See docs/server-brief.md.
+// The doorbell's two media tokens. Separate endpoints rather than one
+// with a role parameter: a parameter is a thing that can be passed
+// wrong, and these two carry deliberately different rights. The
+// publisher can send camera and mic but cannot subscribe to anything;
+// the listener can only subscribe. There is no path through the
+// publisher endpoint that mints a subscriber.
+hardwareRoutes.post('/:deviceId/media-token/publisher', requireDevice, getPublisherToken);
+hardwareRoutes.post('/:deviceId/media-token/listener', requireDevice, getListenerToken);

@@ -4,6 +4,9 @@ import {
   getDevice,
   createDevice,
   joinDevice,
+  claimDevice,
+  createShareCode,
+  revokeShareCode,
   updateDevice,
   updatePreferences,
   markDeviceSeen,
@@ -13,6 +16,7 @@ import {
 } from '../controllers/deviceController.js';
 import { listEvents, createEvent } from '../controllers/eventController.js';
 import { getClipUrl } from '../controllers/clipController.js';
+import { getViewerToken, takeTalk, releaseTalk } from '../controllers/mediaController.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireDeviceAccess, requireDeviceOwner } from '../middleware/deviceAccess.js';
 
@@ -20,10 +24,23 @@ export const deviceRoutes = Router();
 
 deviceRoutes.use(requireAuth); // every route below requires a logged-in user
 
-// Collection-level. /join is declared before the /:id routes so it's
-// matched as a literal path rather than swallowed as a device id.
+// Collection-level. /join and /claim are declared before the /:id routes
+// so they're matched as literal paths rather than swallowed as device ids.
 deviceRoutes.get('/', listDevices);
 deviceRoutes.post('/', createDevice);
+
+// The two codes, and they are not interchangeable.
+//
+//   /claim  the one-time code on the unit. Makes you its owner, once, and
+//           is consumed. This is the only route that creates ownership of
+//           hardware.
+//   /join   a code an owner generated inside the app for a flatmate.
+//           Makes you a member, and never an owner.
+//
+// Collapsing them back into one endpoint is the mistake this split exists
+// to prevent: the code printed on a doorbell bolted to the outside of a
+// house cannot be the code that grants permanent access to its camera.
+deviceRoutes.post('/claim', claimDevice);
 deviceRoutes.post('/join', joinDevice);
 
 // Everything below is scoped to one device the caller is a member of.
@@ -38,6 +55,12 @@ deviceRoutes.patch('/:id/preferences', requireDeviceAccess, updatePreferences);
 deviceRoutes.post('/:id/seen', requireDeviceAccess, markDeviceSeen);
 deviceRoutes.delete('/:id', requireDeviceAccess, requireDeviceOwner, deleteDevice);
 
+// Share codes are made and unmade by the owner, on demand. Nothing mints
+// one at creation any more and nothing prints one on hardware, so these
+// two are the only way a share code comes into existence.
+deviceRoutes.post('/:id/share-code', requireDeviceAccess, requireDeviceOwner, createShareCode);
+deviceRoutes.delete('/:id/share-code', requireDeviceAccess, requireDeviceOwner, revokeShareCode);
+
 deviceRoutes.get('/:id/members', requireDeviceAccess, listMembers);
 // No requireDeviceOwner here: removing *yourself* is "leave", which any
 // member may do. The controller distinguishes the two cases.
@@ -50,3 +73,11 @@ deviceRoutes.post('/:deviceId/events', requireDeviceAccess, createEvent);
 // the browser fetches from the bucket and this server stays out of the
 // path for recorded media as well as live.
 deviceRoutes.get('/:deviceId/events/:eventId/clip', requireDeviceAccess, getClipUrl);
+
+// Live view and talk. All three are membership-gated by
+// requireDeviceAccess, which is half of what makes removing someone
+// revoke their access immediately - the other half is that the token
+// they already hold expires in two minutes.
+deviceRoutes.post('/:deviceId/live', requireDeviceAccess, getViewerToken);
+deviceRoutes.post('/:deviceId/talk', requireDeviceAccess, takeTalk);
+deviceRoutes.delete('/:deviceId/talk', requireDeviceAccess, releaseTalk);

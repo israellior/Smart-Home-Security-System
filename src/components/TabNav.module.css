@@ -6,6 +6,12 @@
 }
 
 .tab {
+  /* inline-flex so a badge sits on the tab's own baseline rather than
+     dropping the row - the underline below is positioned against this
+     box, and it has to keep hugging the label. */
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   background: none;
   border: none;
   font-family: inherit;

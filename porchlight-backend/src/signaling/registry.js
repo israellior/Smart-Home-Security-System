@@ -14,6 +14,20 @@ export const CLOSE_UNAUTHORIZED = 4002;
 export const CLOSE_NO_HELLO = 4003;
 
 /**
+ * "Not now, ask again." A standard code rather than a private one,
+ * because its meaning is the opposite of CLOSE_UNAUTHORIZED's and that
+ * distinction is load-bearing on the device.
+ *
+ * 4002 means *permanent* to a doorbell: it stops reconnecting for the
+ * lifetime of the process, lights the fault LED, and waits for a human.
+ * Correct for a re-minted credential - retrying would be a doorbell
+ * hammering a server that will never say yes - and a site visit for
+ * anything else. So every refusal that waiting could fix has to come
+ * back as this one. See handleHello.
+ */
+export const CLOSE_TRY_LATER = 1013;
+
+/**
  * THE ROLE TRAP.
  *
  * `webrtc-video.py` already signs in as 'pi', and the old LAN stub treats
@@ -98,6 +112,22 @@ export function remove(deviceKey, role, socket) {
 
 export function deviceSocket(deviceKey) {
   return rooms.get(deviceKey)?.[ROLE_DEVICE] || null;
+}
+
+/**
+ * Both of the doorbell's own sockets - the daemon and the media script.
+ *
+ * For the one case that has to reach the hardware rather than address it:
+ * a Device record being deleted. Deleting is the one refusal in this
+ * system that genuinely is permanent, and hardware that is never told
+ * goes on believing it is fine - every HTTP call 401s, the socket sits
+ * open, and the LED stays dark. It has to be closed here so the device
+ * sees its 4002 and shows the fault.
+ */
+export function hardwareSockets(deviceKey) {
+  const r = rooms.get(deviceKey);
+  if (!r) return [];
+  return [r[ROLE_DEVICE], r[ROLE_PI]].filter(Boolean);
 }
 
 export function browserSockets(deviceKey) {

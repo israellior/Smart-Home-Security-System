@@ -5,18 +5,40 @@ import { SegmentedControl } from '../components/SegmentedControl';
 import styles from './AddDevice.module.css';
 
 const MODES = [
-  { value: 'create', label: 'Set up new' },
-  { value: 'join', label: 'Use a code' }
+  { value: 'claim', label: 'New doorbell' },
+  { value: 'join', label: 'Share code' },
+  { value: 'create', label: 'Set up later' }
 ];
 
 /**
- * Two ways to get a doorbell onto your list: create one you'll own, or
- * join one someone else owns with the code they give you. Same
- * destination either way, so they share a form rather than sitting on
- * two pages.
+ * Three ways to get a doorbell onto your list, and the first two take
+ * codes that are deliberately not interchangeable.
+ *
+ *   claim   the one-time code on a new unit. Makes you its owner, and is
+ *           spent by doing it - a second person with the same code, or the
+ *           same photograph of the sticker, is told it has been used.
+ *   join    a code an owner generated inside the app for you. Makes you a
+ *           member, and never an owner.
+ *   create  a doorbell in the app before any hardware exists for it.
+ *
+ * Collapsing the first two into one box is tempting and wrong. A share code
+ * is permanent and a doorbell is bolted to the outside of a house: if the
+ * code printed on the case granted ongoing access, anyone who photographed
+ * the unit could watch that door forever. So one code is consumed and the
+ * other is revocable, and the app keeps the two apart where the person is,
+ * not only where the server is.
  */
+// A table rather than nested ternaries: three modes times two states is
+// where the conditional expression that used to be here stopped being
+// readable.
+const SUBMIT_LABEL = {
+  claim: { idle: 'Claim this doorbell', busy: 'Claiming…' },
+  join: { idle: 'Join doorbell', busy: 'Joining…' },
+  create: { idle: 'Set up doorbell', busy: 'Setting up…' }
+};
+
 export function AddDevice() {
-  const { devices, addDevice, joinDevice } = useDevices();
+  const { devices, addDevice, claimDevice, joinDevice } = useDevices();
   const navigate = useNavigate();
 
   // A name that isn't already on the list. Submitting this form with the
@@ -33,9 +55,12 @@ export function AddDevice() {
     return `Front Door ${n}`;
   }, [devices]);
 
-  const [mode, setMode] = useState('create');
+  // Claiming first: somebody arriving here is far more often holding a new
+  // doorbell than a code a flatmate sent them.
+  const [mode, setMode] = useState('claim');
   const [name, setName] = useState('');
   const [location, setLocation] = useState('');
+  const [claimCode, setClaimCode] = useState('');
   const [shareCode, setShareCode] = useState('');
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -45,10 +70,10 @@ export function AddDevice() {
     setError(null);
     setSubmitting(true);
     try {
-      const device =
-        mode === 'create'
-          ? await addDevice({ name: name.trim() || suggestedName, location: location.trim() })
-          : await joinDevice(shareCode);
+      let device;
+      if (mode === 'claim') device = await claimDevice(claimCode);
+      else if (mode === 'join') device = await joinDevice(shareCode);
+      else device = await addDevice({ name: name.trim() || suggestedName, location: location.trim() });
       // replace: this page shouldn't sit in history behind the device
       // you just landed on - back should go to the list.
       navigate(`/devices/${device._id}`, { replace: true });
@@ -77,7 +102,32 @@ export function AddDevice() {
       {error && <p className={styles.error}>{error}</p>}
 
       <form onSubmit={handleSubmit}>
-        {mode === 'create' ? (
+        {mode === 'claim' && (
+          <div className={styles.field}>
+            <label className={styles.label} htmlFor="claim-code">
+              Claim code
+            </label>
+            <p className={styles.help}>
+              Six characters, on the sticker on the back of the doorbell and on its setup page.
+              It works once — after this it belongs to you, and you share it from the app.
+            </p>
+            <input
+              id="claim-code"
+              className={`${styles.input} ${styles.codeInput}`}
+              type="text"
+              required
+              maxLength={12}
+              placeholder="7K2M9P"
+              autoCapitalize="characters"
+              autoComplete="off"
+              spellCheck="false"
+              value={claimCode}
+              onChange={(e) => setClaimCode(e.target.value)}
+            />
+          </div>
+        )}
+
+        {mode === 'create' && (
           <>
             <div className={styles.field}>
               <label className={styles.label} htmlFor="device-name">
@@ -110,14 +160,21 @@ export function AddDevice() {
                 onChange={(e) => setLocation(e.target.value)}
               />
             </div>
+            <p className={styles.help}>
+              For a doorbell you have not got yet. It appears on your list straight away, with
+              no camera behind it until hardware is paired to it.
+            </p>
           </>
-        ) : (
+        )}
+
+        {mode === 'join' && (
           <div className={styles.field}>
             <label className={styles.label} htmlFor="share-code">
               Share code
             </label>
             <p className={styles.help}>
-              Ask whoever set the doorbell up — they&apos;ll find it under its Settings.
+              Ask whoever set the doorbell up — they create one under its Settings. It starts
+              with PORCH-, and it is not the code printed on the doorbell itself.
             </p>
             <input
               id="share-code"
@@ -135,13 +192,7 @@ export function AddDevice() {
         )}
 
         <button className={styles.submit} type="submit" disabled={submitting}>
-          {submitting
-            ? mode === 'create'
-              ? 'Setting up…'
-              : 'Joining…'
-            : mode === 'create'
-              ? 'Set up doorbell'
-              : 'Join doorbell'}
+          {SUBMIT_LABEL[mode][submitting ? 'busy' : 'idle']}
         </button>
       </form>
     </section>

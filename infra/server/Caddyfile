@@ -1,0 +1,31 @@
+{
+	# Let's Encrypt writes here before a certificate expires, which only
+	# happens if renewal has been failing for weeks.
+	email {$ACME_EMAIL}
+}
+
+{$API_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+
+	# JSON to stdout, which Docker ships to CloudWatch. Caddy redacts the
+	# Authorization header on its own, and the signaling URL carries no
+	# credential - the token travels inside the hello frame.
+	log {
+		output stdout
+		format json
+	}
+
+	# WebSockets need nothing special here; Caddy proxies the upgrade on
+	# its own. What this adds is that a *Caddy* config reload no longer
+	# drops every doorbell's socket - they are left to finish on the old
+	# config for up to five minutes. An API deploy still closes them, with
+	# 1012, because that is a different process going away.
+	reverse_proxy api:4000 {
+		stream_close_delay 5m
+	}
+}

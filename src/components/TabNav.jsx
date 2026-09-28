@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom';
+import { NewBadge } from './NewBadge';
 import styles from './TabNav.module.css';
 
 /**
@@ -10,10 +11,14 @@ import styles from './TabNav.module.css';
  * Built per render because the hrefs depend on which device is open;
  * there's no module-level constant to hoist any more.
  */
-export function TabNav({ deviceId }) {
+export function TabNav({ deviceId, newCount = 0 }) {
   const tabs = [
     { to: `/devices/${deviceId}`, label: 'Overview', end: true },
-    { to: `/devices/${deviceId}/activity`, label: 'Activity' },
+    // The count rides on the tab that will answer it. It needs no
+    // clearing rule of its own: opening Activity is what "seen" means,
+    // and that already moves the watermark this counts against - so by
+    // the time this tab is the active one, it reads zero.
+    { to: `/devices/${deviceId}/activity`, label: 'Activity', newCount },
     { to: `/devices/${deviceId}/settings`, label: 'Settings' }
   ];
 
@@ -27,6 +32,7 @@ export function TabNav({ deviceId }) {
           className={({ isActive }) => `${styles.tab} ${isActive ? styles.active : ''}`}
         >
           {tab.label}
+          <NewBadge count={tab.newCount} />
         </NavLink>
       ))}
     </nav>

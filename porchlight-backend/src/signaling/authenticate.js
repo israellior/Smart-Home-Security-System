@@ -20,6 +20,21 @@ import { ROLE_DEVICE, ROLE_PI, ROLE_BROWSER } from './registry.js';
  * Returns { device } on success, or { error } for a refusal. Anything
  * transient throws instead, and the caller must not answer - see the
  * caller for why that distinction is load-bearing here specifically.
+ *
+ * A refusal may also carry { retryable: true }, which the caller turns
+ * into close code 1013 rather than 4002. Nothing here sets it today and
+ * that is not an oversight: every refusal below - an unparseable
+ * credential, a wrong secret, a device that does not exist, an expired
+ * JWT - is permanent for this connection attempt, and telling a doorbell
+ * to keep retrying one of those would be a doorbell hammering a server
+ * that will never say yes.
+ *
+ * It is here for the refusal that does not exist yet. "Pause this
+ * doorbell" or "disable this device" is a policy answer, not an
+ * authentication one, and sending it as 4002 would stop the hardware
+ * until somebody restarted it on site - an unpausable pause. Anything of
+ * that kind belongs here with retryable set, or does not belong here at
+ * all: leave the socket up and stop acting on what it sends.
  */
 export async function authenticate({ role, deviceId, token }) {
   if (![ROLE_DEVICE, ROLE_PI, ROLE_BROWSER].includes(role)) {

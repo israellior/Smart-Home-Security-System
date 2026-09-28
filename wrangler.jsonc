@@ -1,0 +1,16 @@
+// The frontend on Cloudflare Workers, as static assets only - no Worker
+// script runs; Cloudflare serves the Vite build from its CDN.
+//
+// Built and deployed by Workers Builds on every push to main (see
+// infra/README.md, step 8). VITE_API_URL is a *build* variable there,
+// because Vite bakes it into the bundle at build time.
+{
+  "name": "porchlight",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./dist",
+    // BrowserRouter paths like /devices/abc exist only in the app. Without
+    // this, reloading one of them would be a 404 from the CDN.
+    "not_found_handling": "single-page-application"
+  }
+}

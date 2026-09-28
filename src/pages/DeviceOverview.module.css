@@ -13,11 +13,18 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(circle at 50% 45%, var(--brass-soft), transparent 72%);
+  /* The page colour is painted, not left to show through: the hover
+     state below repaints the ring in the other theme, and a transparent
+     ring would keep the page's own ground underneath the new one. */
+  background: radial-gradient(circle at 50% 45%, var(--brass-soft), transparent 72%) var(--bg);
   border: 1px solid var(--line);
   margin-bottom: 22px;
   position: relative;
   color: var(--muted);
+  /* Rendered as a <button> when there is a camera to open, so the
+     element's own defaults have to go. */
+  padding: 0;
+  font: inherit;
 }
 
 .glowRing::before {
@@ -34,6 +41,37 @@
   position: relative;
 }
 
+/*
+ * Only the button form is interactive - an unprovisioned doorbell
+ * renders the same ring as a plain div, because there is nothing to
+ * open. See DeviceOverview.jsx.
+ */
+button.glowRing {
+  cursor: pointer;
+}
+
+button.glowRing,
+button.glowRing::before {
+  transition: background 0.25s ease, border-color 0.25s ease, color 0.25s ease;
+}
+
+/*
+ * Under the pointer the ring flips into the theme that isn't showing:
+ * a dark ring on the day porch, a light one on the evening porch.
+ * Done by swapping the tokens the ring already reads rather than by
+ * restating any colours, so the gradient, the inner disc, both borders
+ * and the glyph all follow from this one rule - and so do any pieces
+ * added to the ring later.
+ */
+button.glowRing:hover,
+button.glowRing:focus-visible {
+  --bg: var(--flip-bg);
+  --panel: var(--flip-panel);
+  --muted: var(--flip-muted);
+  --brass-soft: var(--flip-brass-soft);
+  --line: var(--flip-line);
+}
+
 .deviceName {
   font-family: var(--font-display);
   font-size: 26px;
@@ -45,6 +83,23 @@
   font-size: 14px;
   color: var(--muted);
   margin: 0 0 4px;
+}
+
+/*
+ * Four states rather than connected/not, so the line carries a tone as
+ * well as words. `idle` - no hardware paired - keeps the muted default
+ * above: nothing is wrong, there is just nothing there yet.
+ */
+.deviceState.online {
+  color: var(--moss);
+}
+
+.deviceState.problem {
+  color: var(--ember);
+}
+
+.deviceState.waiting {
+  color: var(--brass);
 }
 
 .deviceLocation {

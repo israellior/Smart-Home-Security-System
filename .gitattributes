@@ -1,0 +1,12 @@
+# Files that run on Linux keep LF on every checkout, including Windows
+# with core.autocrlf=true. A CRLF in a shell script is "$'\r': command
+# not found" - and user-data.sh is also hashed by Terraform, so a CRLF
+# checkout would read as a changed boot script and replace the server.
+*.sh        text eol=lf
+*.py        text eol=lf
+*.tf        text eol=lf
+*.hcl       text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+Caddyfile   text eol=lf
+Dockerfile  text eol=lf
