@@ -7,7 +7,7 @@ how to operate it afterwards.
  doorbell ─┐                                        ┌─> MongoDB Atlas (eu-west-1)
  browser ──┼─ https/wss ─> api.<domain> ─> Caddy ─> API ─┼─> Cloudflare R2 (clips)
            │              (EC2, eu-west-1, Elastic IP)   └─> LiveKit Cloud (tokens only)
-           └─ https ────> <domain> (Cloudflare Pages: the React app)
+           └─ https ────> <domain> (Cloudflare Workers: the React app)
 ```
 
 - **API**: one Docker container on one EC2 `t4g.small`, behind Caddy, which
@@ -240,7 +240,7 @@ container's last log lines.
 | EC2 t4g.small | $0 until 2026-12-31 (AWS free trial), about $12 after |
 | Public IPv4 (Elastic IP) | about $3.65 |
 | EBS 20 GB gp3, ECR, S3, CloudWatch | about $2 |
-| Atlas M0, Cloudflare Pages, GitHub Actions | $0 |
+| Atlas M0, Cloudflare Workers (static assets), GitHub Actions | $0 |
 
 New-account credits cover all of it for the first months. The budget
 alarm emails at 80% of `monthly_budget_usd` (default $20).

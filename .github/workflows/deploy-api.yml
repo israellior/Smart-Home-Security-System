@@ -1,7 +1,7 @@
 # Builds the API image, ships it, and releases it on the production server.
 #
 # Runs on pushes to main that touch the backend or the server config, and
-# on demand. The frontend is not here: Cloudflare Pages builds it from the
+# on demand. The frontend is not here: Cloudflare Workers Builds builds it from the
 # same push on its own.
 #
 # There are no AWS keys in this repository's secrets. The job proves who
