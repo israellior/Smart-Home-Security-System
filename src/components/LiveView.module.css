@@ -224,3 +224,6 @@
 .noteFull {
   padding: 0 20px calc(16px + env(safe-area-inset-bottom));
 }
+  /* iOS's long-press callout cancels the pointer mid-hold, which reads as
+     a release and drops the floor a second into speaking. */
+  -webkit-touch-callout: none;
