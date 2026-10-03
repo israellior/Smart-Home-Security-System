@@ -1,7 +1,121 @@
 import { useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLiveView } from '../hooks/useLiveView';
+import { AlertIcon, BellIcon, CameraIcon, CameraOffIcon, WifiOffIcon } from './Icons';
 import styles from './LiveView.module.css';
+
+/*
+ * The three things a start waits on, in the order they happen. Each one is
+ * a real signal from the hook rather than a timer dressed up as progress:
+ * the room join, the doorbell's participant arriving, its first frame.
+ */
+const STEPS = ['Connect', 'Wake doorbell', 'Video'];
+
+/**
+ * Everything the stage says while there is no picture to show.
+ *
+ * One place that decides which situation this is, because they used to be
+ * scattered across two overlays that could, in the wrong order of events,
+ * both render. The cases below are mutually exclusive by construction.
+ *
+ * `deviceOnline` is the server's report that it wrote a cue to a socket -
+ * not that anything read it - so it can only ever say "offline", never
+ * "on its way". `unanswered` is the only signal that knows the waiting is
+ * over.
+ */
+function StageStatus({ live, deviceName }) {
+  let view;
+
+  if (live.error && !live.isLive) {
+    view = {
+      tone: 'bad',
+      icon: <AlertIcon size={26} />,
+      title: 'Couldn’t connect',
+      detail: live.error,
+      action: { label: 'Try again', onClick: live.retry }
+    };
+  } else if (live.isIdle) {
+    view = {
+      tone: 'quiet',
+      icon: <CameraIcon size={26} />,
+      title: 'Camera is off',
+      detail: 'Press View live to see who’s at the door.'
+    };
+  } else if (live.isLive && live.deviceOnline === false) {
+    view = {
+      tone: 'bad',
+      icon: <WifiOffIcon size={26} />,
+      title: `${deviceName} is offline`,
+      detail: 'Check that it has power and is in range of your Wi-Fi.',
+      action: { label: 'Try again', onClick: live.retry }
+    };
+  } else if (live.isLive && live.unanswered) {
+    view = {
+      tone: 'bad',
+      icon: <CameraOffIcon size={26} />,
+      title: 'Your doorbell didn’t answer',
+      detail: 'It may have lost power or Wi-Fi. Trying again is safe.',
+      action: { label: 'Try again', onClick: live.retry }
+    };
+  } else {
+    const step = live.isConnecting ? 0 : live.doorbellJoined ? 2 : 1;
+    view = {
+      tone: 'busy',
+      step,
+      icon: step === 1 ? <BellIcon size={26} /> : <CameraIcon size={26} />,
+      title: ['Connecting…', `Waking up ${deviceName}`, 'Starting video'][step],
+      detail: [
+        'Opening a private connection to your doorbell.',
+        'It rests between visits, so this takes a few seconds.',
+        'The picture will appear in a moment.'
+      ][step]
+    };
+  }
+
+  return (
+    <div className={`${styles.status} ${styles[`tone_${view.tone}`]}`}>
+      <div className={styles.statusIcon}>
+        {view.tone === 'busy' && (
+          <>
+            <span className={styles.pulse} aria-hidden="true" />
+            <span className={`${styles.pulse} ${styles.pulseLate}`} aria-hidden="true" />
+          </>
+        )}
+        {view.icon}
+      </div>
+
+      {/* Polite: a screen reader hears each step as it changes, without the
+          interruption an alert would make of something this routine. */}
+      <p className={styles.statusTitle} role="status" aria-live="polite">
+        {view.title}
+      </p>
+      <p className={styles.statusDetail}>{view.detail}</p>
+
+      {view.step !== undefined && (
+        <ol className={styles.steps} aria-label="Progress">
+          {STEPS.map((label, i) => (
+            <li
+              key={label}
+              className={
+                i < view.step ? styles.stepDone : i === view.step ? styles.stepNow : styles.step
+              }
+              aria-current={i === view.step ? 'step' : undefined}
+            >
+              <span className={styles.stepBar} aria-hidden="true" />
+              <span className={styles.stepLabel}>{label}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+
+      {view.action && (
+        <button className={styles.overlayBtn} type="button" onClick={view.action.onClick}>
+          {view.action.label}
+        </button>
+      )}
+    </div>
+  );
+}
 
 /**
  * The doorbell's camera, and the button that lets you answer it.
@@ -114,38 +228,22 @@ export function LiveView({ device, expanded = false, onCollapse }) {
         />
         <audio ref={live.audioRef} autoPlay />
 
-        {!live.isLive && (
-          <div className={styles.overlay}>
-            {live.isIdle && !live.error && <p className={styles.hint}>Camera is off</p>}
-            {live.isConnecting && <p className={styles.hint}>Connecting…</p>}
-            {live.error && <p className={styles.error}>{live.error}</p>}
-          </div>
+        {!live.hasVideo && <StageStatus live={live} deviceName={device.name} />}
+
+        {live.hasVideo && (
+          <span className={`${styles.liveBadge} ${expanded ? styles.liveBadgeFull : ''}`}>
+            <span className={styles.liveDot} aria-hidden="true" />
+            Live
+          </span>
         )}
 
-        {/*
-          * Connected to the room, but the doorbell has not shown up in it.
-          *
-          * The three messages here are three different situations and used
-          * to be one. `deviceOnline` is the server's report that it wrote a
-          * cue to a socket - not that anything read it - so a doorbell that
-          * lost power thirty seconds ago still reports true, and this used
-          * to sit on "Waiting for the camera" indefinitely. `unanswered` is
-          * the only one of the three that knows the waiting is over.
-          */}
-        {live.isLive && !live.hasVideo && (
-          <div className={styles.overlay}>
-            {live.deviceOnline === false ? (
-              <p className={styles.hint}>Your doorbell is offline — nothing is being sent</p>
-            ) : live.unanswered ? (
-              <>
-                <p className={styles.hint}>Your doorbell didn’t answer</p>
-                <button className={styles.overlayBtn} type="button" onClick={live.retry}>
-                  Try again
-                </button>
-              </>
-            ) : (
-              <p className={styles.hint}>Waiting for the camera…</p>
-            )}
+        {/* Over the frozen last frame rather than replacing it: the picture
+            is still the most useful thing on screen, and it is about to
+            start moving again. */}
+        {live.hasVideo && live.reconnecting && (
+          <div className={styles.reconnecting} role="status">
+            <span className={styles.spinner} aria-hidden="true" />
+            Reconnecting…
           </div>
         )}
       </div>
