@@ -1,7 +1,7 @@
 import { WebSocketServer } from 'ws';
 import { Device } from '../models/Device.js';
 import { ingestEvent, REJECTED } from '../services/events/ingestEvent.js';
-import { eventBus, EVENT_INGESTED } from '../services/events/eventBus.js';
+import { eventBus, EVENT_INGESTED, CLIP_STORED } from '../services/events/eventBus.js';
 import { authenticate } from './authenticate.js';
 import {
   talkFloorBus,
@@ -312,6 +312,17 @@ export function attachSignaling(server) {
       for (const socket of registry.browserSockets(String(device._id))) send(socket, payload);
     } catch (err) {
       console.error('Live event push failed:', err.message);
+    }
+  });
+
+  // A clip landing for an alert already on someone's screen. Keyed by the
+  // device's eventId, which is what the activity list matches clips on.
+  eventBus.on(CLIP_STORED, ({ device, eventId, clip }) => {
+    try {
+      const payload = { type: 'clip', eventId, clip };
+      for (const socket of registry.browserSockets(String(device._id))) send(socket, payload);
+    } catch (err) {
+      console.error('Clip-ready push failed:', err.message);
     }
   });
 

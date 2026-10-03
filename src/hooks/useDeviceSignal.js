@@ -18,6 +18,10 @@ import { signalUrl, backoffDelay, CLOSE_UNAUTHORIZED } from '../api/signal';
 export function useDeviceSignal(token, deviceId) {
   const [connected, setConnected] = useState(null);
   const [lastEvent, setLastEvent] = useState(null);
+  // A clip that finished uploading, kept apart from lastEvent on purpose:
+  // it fills in an alert that is already listed, and anything counting
+  // unread events off lastEvent must not count it as a new one.
+  const [lastClip, setLastClip] = useState(null);
 
   useEffect(() => {
     if (!token || !deviceId) return undefined;
@@ -28,6 +32,7 @@ export function useDeviceSignal(token, deviceId) {
     // show the new one as connected until its socket disagreed.
     setConnected(null);
     setLastEvent(null);
+    setLastClip(null);
 
     let socket = null;
     let retryTimer = null;
@@ -64,6 +69,9 @@ export function useDeviceSignal(token, deviceId) {
           case 'event':
             setLastEvent(frame.event);
             break;
+          case 'clip':
+            setLastClip({ eventId: frame.eventId, clip: frame.clip });
+            break;
           default:
             break;
         }
@@ -99,5 +107,5 @@ export function useDeviceSignal(token, deviceId) {
     };
   }, [token, deviceId]);
 
-  return { connected, lastEvent };
+  return { connected, lastEvent, lastClip };
 }
