@@ -22,6 +22,9 @@ export function useDeviceSignal(token, deviceId) {
   // it fills in an alert that is already listed, and anything counting
   // unread events off lastEvent must not count it as a new one.
   const [lastClip, setLastClip] = useState(null);
+  // Who is recording the live view, `{ userId, name }` or null. Pushed on
+  // every change, so only one person is ever offered the Rec button.
+  const [recorder, setRecorder] = useState(null);
 
   useEffect(() => {
     if (!token || !deviceId) return undefined;
@@ -33,6 +36,7 @@ export function useDeviceSignal(token, deviceId) {
     setConnected(null);
     setLastEvent(null);
     setLastClip(null);
+    setRecorder(null);
 
     let socket = null;
     let retryTimer = null;
@@ -62,6 +66,7 @@ export function useDeviceSignal(token, deviceId) {
             // resetting there would retry it at full speed forever.
             attempt = 0;
             setConnected(Boolean(frame.connected));
+            setRecorder(frame.recorder ?? null);
             break;
           case 'presence':
             setConnected(Boolean(frame.connected));
@@ -71,6 +76,9 @@ export function useDeviceSignal(token, deviceId) {
             break;
           case 'clip':
             setLastClip({ eventId: frame.eventId, clip: frame.clip });
+            break;
+          case 'record-floor':
+            setRecorder(frame.recorder ?? null);
             break;
           default:
             break;
@@ -107,5 +115,5 @@ export function useDeviceSignal(token, deviceId) {
     };
   }, [token, deviceId]);
 
-  return { connected, lastEvent, lastClip };
+  return { connected, lastEvent, lastClip, recorder };
 }

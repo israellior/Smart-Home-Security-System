@@ -118,13 +118,30 @@ export function clipKey(deviceId, eventId) {
  * device sends a fixed set we do not control. Content-Type rides in the
  * returned `headers` instead, which the uploader copies verbatim onto
  * the PUT.
+ *
+ * `bytes` is for a browser, which can be held to more. A recording from
+ * the live view is finished before its grant is asked for, so its size is
+ * known, and signing Content-Length makes the grant good for exactly that
+ * many bytes - the bucket refuses anything else on signature alone. That
+ * is the whole of the size limit: a presigned PUT has no other way to say
+ * "no larger than". Content-Type is signed with it, because a browser
+ * sends exactly what it is told to and a device's urllib is not involved.
  */
-export async function signUpload(deviceId, eventId) {
+export async function signUpload(deviceId, eventId, { bytes } = {}) {
   const key = pendingKey(deviceId, eventId);
+  const sized = typeof bytes === 'number';
   const url = await getSignedUrl(
     requireClient(),
-    new PutObjectCommand({ Bucket: R2_BUCKET, Key: key, ContentType: CONTENT_TYPE }),
-    { expiresIn: UPLOAD_URL_TTL_SECONDS, signableHeaders: new Set(['host']) }
+    new PutObjectCommand({
+      Bucket: R2_BUCKET,
+      Key: key,
+      ContentType: CONTENT_TYPE,
+      ...(sized && { ContentLength: bytes })
+    }),
+    {
+      expiresIn: UPLOAD_URL_TTL_SECONDS,
+      signableHeaders: new Set(sized ? ['host', 'content-length', 'content-type'] : ['host'])
+    }
   );
 
   return {

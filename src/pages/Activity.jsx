@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useDevices } from '../context/DevicesContext';
 import { useDevice, useDeviceLive } from '../components/DeviceLayout';
 import { NewBadge } from '../components/NewBadge';
-import { BellIcon, CloseIcon, MotionIcon, PlayIcon } from '../components/Icons';
+import { BellIcon, CloseIcon, MotionIcon, PlayIcon, RecordIcon } from '../components/Icons';
 import { api } from '../api/client';
 import styles from './Activity.module.css';
 
@@ -21,13 +21,29 @@ const PREVIEW_EVENTS = [
 
 const EVENT_TITLES = {
   motion: 'Motion detected',
-  ring: 'Someone rang the bell'
+  ring: 'Someone rang the bell',
+  live: 'Recorded from live view'
 };
 
 const EVENT_ICONS = {
   motion: MotionIcon,
-  ring: BellIcon
+  ring: BellIcon,
+  live: RecordIcon
 };
+
+// A recording a member kept, rather than something the doorbell noticed.
+// It is never "new": the person who made it was there, and nobody else is
+// being told that someone is at the door.
+const isRecording = (event) => event.type === 'live';
+
+// Whose it was, from the name the server stored when it was saved - so it
+// still reads right after they have left the doorbell.
+function recordedBy(event, userId) {
+  const by = event.meta?.recordedBy;
+  if (!by) return null;
+  if (userId && by.id === userId) return 'by you';
+  return by.name ? `by ${by.name}` : null;
+}
 
 // A row shows when the sensor fired, so an alert the doorbell queued
 // through an outage appears at the time it happened - correct, but it
@@ -172,7 +188,7 @@ function mergeEvent(list, incoming) {
 }
 
 export function Activity() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const { markSeen, beginReading } = useDevices();
   const device = useDevice();
   const { lastEvent, lastClip } = useDeviceLive();
@@ -314,7 +330,9 @@ export function Activity() {
   // carries an old `at` but only reached the server just now - judging it
   // by `at` would file it as already-seen and hide it under "Earlier",
   // which is precisely the event you most wanted to be told about.
-  const isNew = (event) => !seenAtOnOpen || new Date(event.receivedAt) > new Date(seenAtOnOpen);
+  const isNew = (event) =>
+    !isRecording(event) &&
+    (!seenAtOnOpen || new Date(event.receivedAt) > new Date(seenAtOnOpen));
   const newEvents = events.filter(isNew);
   const earlierEvents = events.filter((event) => !isNew(event));
 
@@ -329,7 +347,10 @@ export function Activity() {
     let caption = 'No clip';
     let captionHint =
       'Nothing was recorded for this one - it was very short, or the camera was busy with a live view.';
-    if (state === 'ready') {
+    if (state === 'ready' && isRecording(event)) {
+      caption = ['Recording', recordedBy(event, user?.id)].filter(Boolean).join(' ');
+      captionHint = undefined;
+    } else if (state === 'ready') {
       caption = event.clip.partial ? 'Clip · cut short' : 'Clip';
       captionHint = event.clip.partial
         ? 'Someone opened the live view and cut the recording short'

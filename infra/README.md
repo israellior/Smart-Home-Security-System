@@ -62,6 +62,9 @@ Once, in this order. Each step says what it needs from the previous one.
   never join prod rooms.
 - **R2**: a separate bucket (`porchlight-clips-prod`), with an
   *Object Read & Write* token scoped to that bucket only.
+  Give it the CORS policy in porchlight-backend/README.md
+  ("Recordings from the live view") with `https://porchl.stream` as
+  the origin, or recording from the live view cannot upload.
 - **Local tools**: Terraform
   (`winget install Hashicorp.Terraform`), and the
   [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)

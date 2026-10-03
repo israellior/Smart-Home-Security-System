@@ -18,10 +18,23 @@ import mongoose from 'mongoose';
 // lexicographically - which is a coincidence, not a rule. It survives
 // exactly until someone adds a third kind, at which point the ordering
 // silently becomes alphabetical and a real event gets downgraded at 3am.
-const KIND_BY_RANK = ['motion', 'ring'];
+//
+// `live` is the odd one out: a recording someone made from the live view.
+// It is not an alert and is never upgraded to or from - the server mints
+// its eventId, so no device event can share one - and it sits last only
+// because appending is the one change that does not renumber the rows
+// already stored. Its rank means nothing; ALERT_KINDS is what says which
+// kinds the upgrade rule applies to.
+const KIND_BY_RANK = ['motion', 'ring', 'live'];
 
 export const RANK_BY_KIND = Object.fromEntries(KIND_BY_RANK.map((kind, rank) => [kind, rank]));
 export const KINDS = KIND_BY_RANK;
+
+// What a doorbell can report, and what counts as "someone was at the door"
+// for unread badges. A recording is something a member chose to keep, not
+// news - nobody should be badged or notified about one.
+export const ALERT_KINDS = ['motion', 'ring'];
+export const ALERT_RANKS = ALERT_KINDS.map((kind) => RANK_BY_KIND[kind]);
 
 const eventSchema = new mongoose.Schema(
   {
@@ -52,7 +65,8 @@ const eventSchema = new mongoose.Schema(
     receivedAt: { type: Date, required: true },
 
     // Optional free-form details - e.g. { pixelsChanged: 2240 } from the
-    // motion detector's frame-diff output.
+    // motion detector's frame-diff output. A live recording carries
+    // { recordedBy: { id, name } } here, written by the server.
     meta: { type: mongoose.Schema.Types.Mixed, default: {} }
   },
   { timestamps: true }

@@ -41,6 +41,13 @@ const clipSchema = new mongoose.Schema(
     // should say so.
     partial: { type: Boolean, default: false },
 
+    // Set only on a recording made from the live view: the member whose
+    // browser recorded and uploaded it. Null on everything the doorbell
+    // uploads. It is also the authority for confirming the upload - a
+    // member can only ever confirm a recording their own grant began,
+    // never a doorbell's clip that happens to share the route shape.
+    recordedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+
     confirmedAt: { type: Date, default: null }
   },
   { timestamps: true }
