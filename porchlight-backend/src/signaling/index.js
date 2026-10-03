@@ -9,6 +9,12 @@ import {
   releaseIfHeld,
   releaseWhoeverHolds
 } from '../services/media/talkFloor.js';
+import {
+  recordingFloorBus,
+  RECORDING_FLOOR_CHANGED,
+  whoIsRecording,
+  releaseRecordingIfHeld
+} from '../services/media/recordingFloor.js';
 import * as registry from './registry.js';
 import {
   ROLE_DEVICE,
@@ -338,6 +344,17 @@ export function attachSignaling(server) {
     }
   });
 
+  // Who is recording - pushed so everyone else's Rec button says so, and
+  // frees up the moment they stop.
+  recordingFloorBus.on(RECORDING_FLOOR_CHANGED, ({ deviceKey, recorder }) => {
+    try {
+      const payload = { type: 'record-floor', recorder };
+      for (const socket of registry.browserSockets(deviceKey)) send(socket, payload);
+    } catch (err) {
+      console.error('Recording floor broadcast failed:', err.message);
+    }
+  });
+
   console.log('Signaling attached at /signal');
   return wss;
 }
@@ -420,7 +437,10 @@ async function handleHello(socket, frame) {
     peer: socket.ctx.peerId,
     // So a browser renders the right state immediately instead of
     // assuming offline until the next transition.
-    connected: registry.isDeviceOnline(deviceKey)
+    connected: registry.isDeviceOnline(deviceKey),
+    // Who is recording, for the same reason: a viewer arriving mid-recording
+    // should see the button taken, not find out by pressing it.
+    ...(role === ROLE_BROWSER && { recorder: whoIsRecording(deviceKey) })
   });
 
   if (role === ROLE_DEVICE) {
@@ -521,7 +541,11 @@ function handleClose(socket) {
   // or not - closing the tab mid-sentence is the ordinary way a turn
   // ends. Without this the floor would sit held until someone else
   // pressed the button.
-  if (role === ROLE_BROWSER && removed) releaseIfHeld(deviceKey, userId);
+  if (role === ROLE_BROWSER && removed) {
+    releaseIfHeld(deviceKey, userId);
+    // The same for a recording: a closed tab has stopped recording.
+    releaseRecordingIfHeld(deviceKey, userId && String(userId));
+  }
 
   // `removed` is false when this socket had already been displaced by a
   // newer one. Skipping the presence write in that case is what stops a

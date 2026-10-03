@@ -80,6 +80,28 @@ export const api = {
   // has an effect beyond handing something back.
   startLive: (token, deviceId) => request(`/devices/${deviceId}/live`, { method: 'POST', token }),
 
+  // A recording from the live view: ask for somewhere to put it (sized to
+  // the finished file), PUT it straight to the bucket, then confirm. The
+  // PUT is not here - it goes to the bucket, not to us - see
+  // useLiveRecording.
+  // The turn to record - one member at a time, first press holds it. A 409
+  // names whoever has it.
+  takeRecording: (token, deviceId) =>
+    request(`/devices/${deviceId}/record`, { method: 'POST', token }),
+  releaseRecording: (token, deviceId) =>
+    request(`/devices/${deviceId}/record`, { method: 'DELETE', token }),
+  startRecording: (token, deviceId, { bytes, durationMs }) =>
+    request(`/devices/${deviceId}/recordings`, {
+      method: 'POST',
+      body: { bytes, durationMs },
+      token
+    }),
+  confirmRecording: (token, deviceId, eventId) =>
+    request(`/devices/${deviceId}/recordings/${encodeURIComponent(eventId)}/confirm`, {
+      method: 'POST',
+      token
+    }),
+
   takeTalk: (token, deviceId) => request(`/devices/${deviceId}/talk`, { method: 'POST', token }),
   releaseTalk: (token, deviceId) => request(`/devices/${deviceId}/talk`, { method: 'DELETE', token })
 };

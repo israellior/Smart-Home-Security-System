@@ -68,6 +68,17 @@ export function CameraIcon(props) {
   );
 }
 
+// A dot in a ring: the record button's mark on every camera, and the
+// mark of a recording someone kept from the live view in Activity.
+export function RecordIcon(props) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="8.5" />
+      <circle cx="12" cy="12" r="4" fill="currentColor" stroke="none" />
+    </Icon>
+  );
+}
+
 export function CameraOffIcon(props) {
   return (
     <Icon {...props}>

@@ -75,6 +75,10 @@ register/login.
 | GET    | `/devices/:deviceId/events` (auth) | Events, newest first. `?limit=` (max 100) and `?before=<cursor>` |
 | POST   | `/devices/:deviceId/events` (auth) | Log an event: `{ type, meta, eventId?, at? }` → `{ event, outcome }` |
 | GET    | `/devices/:deviceId/events/:eventId/clip` (auth) | Short-lived signed URL to play a clip |
+| POST   | `/devices/:deviceId/record` (auth) | Take the recording turn - one member at a time, **first press holds**; 409 names the holder |
+| DELETE | `/devices/:deviceId/record` (auth) | Give it back — holder only |
+| POST   | `/devices/:deviceId/recordings` (auth) | `{ bytes, durationMs }` → `{ eventId, url, … }`, a PUT grant for a live-view recording |
+| POST   | `/devices/:deviceId/recordings/:eventId/confirm` (auth) | Recording uploaded → it appears in Activity |
 | POST   | `/devices/:deviceId/live`   (auth) | Viewer token + nudges the doorbell to join |
 | POST   | `/devices/:deviceId/talk`   (auth) | Take the microphone (last press wins) |
 | DELETE | `/devices/:deviceId/talk`   (auth) | Give it back — holder only |
@@ -421,6 +425,60 @@ Without R2 configured the clip endpoints return **503** and everything else
 runs normally. A doorbell that cannot upload keeps its recording and retries,
 which is what it already does for every other transient failure.
 
+### Recordings from the live view
+
+A member can press **Rec** while watching. The doorbell cannot record then -
+its camera belongs to the call, and a second H.264 encode is more than the Pi
+has - so the viewer's browser records what it is already showing: the
+doorbell's picture and sound, mixed with the viewer's own microphone while they
+hold Talk.
+
+**One member records at a time.** `POST /record` takes the turn before the
+browser starts its recorder, and `DELETE /record` gives it back the moment it
+stops - before the upload, so the next person need not wait for it. It is the
+talk floor's opposite rule: first press holds, because taking a turn away would
+cut someone's recording short. Everyone watching is pushed a `record-floor`
+frame (`{ recorder: { userId, name } | null }`, also on `hello-ok`), so their
+Rec button says who has it, and they are told their voice is included if they
+talk. A closed tab frees the turn; a holder that never says anything loses it
+after five and a half minutes. It is coordination, not access control - see
+`services/media/recordingFloor.js`.
+
+The recording itself is the same three steps as a doorbell clip, made by a
+person:
+
+1. `POST /devices/:deviceId/recordings` with `{ bytes, durationMs }`. The
+   server mints the `eventId` and signs a PUT for **exactly** `bytes`
+   (Content-Length is in the signature), capped at 100MB and five minutes.
+2. `PUT` straight to the bucket - same `pending/` key, same lifecycle rule.
+3. `POST …/recordings/:eventId/confirm`. Only the member who was given the
+   grant can confirm it. The object is promoted, then an event of kind `live`
+   is created, so a recording appears in Activity only once it is playable.
+
+`live` is an event kind but **not an alert** (`ALERT_KINDS` in
+`models/Event.js`): `ingestEvent` refuses it, nobody is notified, and it never
+counts towards unread. Recordings are MP4 only, because they play back on every
+member's phone; Firefox cannot record MP4 and is told so.
+
+**The bucket needs a CORS rule for this.** A doorbell's urllib does not care
+about CORS; a browser PUT is refused without it. In the R2 dashboard: bucket →
+Settings → CORS policy:
+
+```json
+[
+  {
+    "AllowedOrigins": ["https://porchl.stream"],
+    "AllowedMethods": ["PUT"],
+    "AllowedHeaders": ["content-type"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+For local development, add `http://localhost:5173` to a dev bucket's origins,
+not the production one. Playback needs no rule: a `<video src>` is not a CORS
+request.
+
 ## Signaling (`/signal`)
 
 A WebSocket sharing the API's port — one origin, one deployment, no second
@@ -701,6 +759,7 @@ src/
   middleware/deviceAuth.js   - device credentials (requireDevice)  -> a Pi
   middleware/deviceAccess.js - "may this user touch this device?"
   controllers/               - request handlers, one file per resource
+                               (recordingController: live-view recordings)
   routes/                    - route tables, wired to controllers
   config/storage.js          - R2: presigned upload and playback grants
   services/events/           - ingestEvent: the only way an event gets in

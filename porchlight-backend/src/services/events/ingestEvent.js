@@ -1,4 +1,4 @@
-import { Event, RANK_BY_KIND } from '../../models/Event.js';
+import { Event, RANK_BY_KIND, ALERT_KINDS } from '../../models/Event.js';
 import { dispatchEventNotifications } from '../notifications/index.js';
 import { eventBus, EVENT_INGESTED } from './eventBus.js';
 
@@ -47,8 +47,10 @@ function reject(reason) {
 }
 
 export async function ingestEvent({ device, eventId, kind, at, meta }) {
+  // Alerts only. A `live` recording is made by the server on a member's
+  // say-so, and accepting it here would let a doorbell file one.
+  if (!ALERT_KINDS.includes(kind)) return reject(`Unknown kind "${kind}"`);
   const rank = RANK_BY_KIND[kind];
-  if (rank === undefined) return reject(`Unknown kind "${kind}"`);
 
   if (typeof eventId !== 'string' || eventId.length === 0 || eventId.length > 128) {
     return reject('eventId must be a non-empty string');

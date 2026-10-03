@@ -248,6 +248,9 @@ export function DevicesProvider({ children }) {
     (event) => {
       const id = event?.device;
       if (!id || !event._id || notedRef.current.has(event._id)) return;
+      // A recording someone saved from the live view is not an alert, and
+      // the server does not count it either - see ALERT_KINDS there.
+      if (event.type === 'live') return;
       notedRef.current.add(event._id);
 
       // Somebody has this doorbell's activity list open, so the alert is

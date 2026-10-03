@@ -1,7 +1,9 @@
 import { useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLiveView } from '../hooks/useLiveView';
-import { AlertIcon, BellIcon, CameraIcon, CameraOffIcon, WifiOffIcon } from './Icons';
+import { useLiveRecording } from '../hooks/useLiveRecording';
+import { useDeviceLive } from './DeviceLayout';
+import { AlertIcon, BellIcon, CameraIcon, CameraOffIcon, RecordIcon, WifiOffIcon } from './Icons';
 import styles from './LiveView.module.css';
 
 /*
@@ -117,6 +119,81 @@ function StageStatus({ live, deviceName }) {
   );
 }
 
+const pad = (n) => String(n).padStart(2, '0');
+
+function formatElapsed(ms) {
+  const total = Math.floor(ms / 1000);
+  return `${Math.floor(total / 60)}:${pad(total % 60)}`;
+}
+
+/**
+ * The line under the controls, which has more to say than it used to.
+ *
+ * A recording's news outranks the talk hint because it is the thing that
+ * can be lost: a save that failed has to stay on screen with its way out
+ * until somebody chooses one. And it is shown whether or not the call is
+ * still up - pressing End is the most natural way to stop recording, and
+ * the save carries on after it.
+ */
+function Note({ live, rec, othersRecording, expanded }) {
+  const fullClass = expanded ? styles.noteFull : '';
+
+  if (rec.failed) {
+    return (
+      <div className={`${styles.noteError} ${fullClass}`} role="alert">
+        <p className={styles.noteText}>Your recording wasn’t saved. {rec.error}</p>
+        <div className={styles.noteActions}>
+          <button type="button" className={styles.noteBtn} onClick={rec.retry}>
+            Try again
+          </button>
+          {rec.downloadUrl && (
+            <a className={styles.noteBtn} href={rec.downloadUrl} download="porchlight-recording.mp4">
+              Download
+            </a>
+          )}
+          <button type="button" className={styles.noteBtn} onClick={rec.discard}>
+            Discard
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  let text = null;
+  let tone = styles.note;
+  if (live.isLive && live.error) {
+    text = live.error;
+    tone = styles.noteError;
+  } else if (rec.error) {
+    text = rec.error;
+    tone = styles.noteError;
+  } else if (rec.saving) {
+    text = 'Saving your recording to Activity…';
+  } else if (rec.saved) {
+    text = 'Saved to Activity. Everyone on this doorbell can watch it.';
+  } else if (rec.recording) {
+    text = live.talking
+      ? 'Recording, with your voice. They can hear you.'
+      : 'Recording. It will be saved to Activity for everyone on this doorbell.';
+  } else if (live.isLive && othersRecording) {
+    // Said to everyone else on the call, because their voice is in it too
+    // the moment they hold Talk.
+    const who = othersRecording.name || 'Someone';
+    text = live.talking
+      ? `${who} is recording, and your voice is included.`
+      : `${who} is recording. Anything you say will be included.`;
+  } else if (live.isLive) {
+    text = live.talking ? 'They can hear you.' : 'Hold the button to speak.';
+  }
+
+  if (!text) return null;
+  return (
+    <p className={`${tone} ${fullClass}`} role={rec.saving || rec.saved ? 'status' : undefined}>
+      {text}
+    </p>
+  );
+}
+
 /**
  * The doorbell's camera, and the button that lets you answer it.
  *
@@ -132,9 +209,31 @@ function StageStatus({ live, deviceName }) {
  * rejoin because someone tapped the ring.
  */
 export function LiveView({ device, expanded = false, onCollapse }) {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const live = useLiveView(token, device._id);
+  // Who holds the one recording turn, from the doorbell's socket. Only
+  // somebody else holding it matters here - our own turn is already
+  // known to useLiveRecording.
+  const { recorder } = useDeviceLive();
+  const othersRecording = recorder && recorder.userId !== user?.id ? recorder : null;
+  // Fed from the call rather than from the <video>: the same tracks, but
+  // these say when they change, and a recording has to follow voices as
+  // they join and leave.
+  const rec = useLiveRecording({
+    token,
+    deviceId: device._id,
+    videoTrack: live.videoTrack,
+    audioTracks: live.audioTracks
+  });
   const closeRef = useRef(null);
+
+  // "Dana is already recording" stops being true when Dana stops, and the
+  // refusal should not outlive it.
+  const othersId = othersRecording?.userId ?? null;
+  const { clearError } = rec;
+  useEffect(() => {
+    if (!othersId) clearError();
+  }, [othersId, clearError]);
 
   const talkHandlers = {
     onPointerDown: live.startTalking,
@@ -234,6 +333,14 @@ export function LiveView({ device, expanded = false, onCollapse }) {
           <span className={`${styles.liveBadge} ${expanded ? styles.liveBadgeFull : ''}`}>
             <span className={styles.liveDot} aria-hidden="true" />
             Live
+            {/* On the picture as well as on the button, because the
+                picture is where you are looking - and being recorded is
+                something the person holding the phone should never be
+                unsure of. */}
+            {rec.recording && (
+              <span className={styles.recTag}>Rec {formatElapsed(rec.elapsedMs)}</span>
+            )}
+            {othersRecording && <span className={styles.recTag}>Rec</span>}
           </span>
         )}
 
@@ -267,6 +374,36 @@ export function LiveView({ device, expanded = false, onCollapse }) {
             >
               {live.talking ? 'Release to stop' : 'Hold to talk'}
             </button>
+            {/* A toggle, unlike Talk: a recording is meant to run while you
+                do other things, including talking. It stops itself when the
+                picture goes and at the length limit, so it cannot be left
+                running by accident. */}
+            <button
+              className={`${styles.record} ${rec.recording ? styles.recordOn : ''}`}
+              type="button"
+              onClick={rec.recording ? rec.stop : rec.start}
+              disabled={
+                !rec.recording &&
+                (!live.hasVideo || rec.starting || rec.saving || rec.failed || Boolean(othersRecording))
+              }
+              aria-pressed={rec.recording}
+              aria-label={
+                rec.recording
+                  ? `Stop recording, ${formatElapsed(rec.elapsedMs)} recorded`
+                  : othersRecording
+                    ? `${othersRecording.name || 'Someone else'} is recording`
+                    : 'Record'
+              }
+            >
+              <RecordIcon size={16} />
+              {rec.recording
+                ? formatElapsed(rec.elapsedMs)
+                : rec.saving
+                  ? 'Saving'
+                  : rec.starting
+                    ? 'Rec…'
+                    : 'Rec'}
+            </button>
             <button className={styles.secondary} type="button" onClick={live.stop}>
               End
             </button>
@@ -279,15 +416,7 @@ export function LiveView({ device, expanded = false, onCollapse }) {
           failed talk attempt set an error message that nothing on the
           page could ever display, and holding the button looked exactly
           like holding a button that did nothing. */}
-      {live.isLive && (
-        <p
-          className={`${live.error ? styles.noteError : styles.note} ${
-            expanded ? styles.noteFull : ''
-          }`}
-        >
-          {live.error || (live.talking ? 'They can hear you.' : 'Hold the button to speak.')}
-        </p>
-      )}
+      <Note live={live} rec={rec} othersRecording={othersRecording} expanded={expanded} />
     </div>
   );
 }

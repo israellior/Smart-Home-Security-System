@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Room, RoomEvent, Track } from 'livekit-client';
 import { api } from '../api/client';
 
@@ -74,8 +74,16 @@ export function useLiveView(token, deviceId) {
   const [phase, setPhase] = useState(IDLE);
   const [error, setError] = useState(null);
   const [deviceOnline, setDeviceOnline] = useState(null);
-  const [talking, setTalking] = useState(false);
-  const [hasVideo, setHasVideo] = useState(false);
+  // The tracks themselves rather than flags about them, because a recording
+  // is made from them: the doorbell's picture, every remote sound (the
+  // doorbell, and anyone else on the call who takes the floor), and our own
+  // microphone while it is open. `talking` and `hasVideo` are read off these
+  // so there is one source for each fact.
+  const [mic, setMic] = useState(null);
+  const [videoTrack, setVideoTrack] = useState(null);
+  const [remoteAudio, setRemoteAudio] = useState([]);
+  const talking = mic !== null;
+  const hasVideo = videoTrack !== null;
   // The doorbell was asked and did not turn up. Distinct from an error:
   // nothing failed, and pressing the button again is a reasonable thing to
   // do about it.
@@ -108,8 +116,9 @@ export function useLiveView(token, deviceId) {
     if (room) room.disconnect().catch(() => {});
     clearTimeout(answerTimer.current);
     setPhase(IDLE);
-    setTalking(false);
-    setHasVideo(false);
+    setMic(null);
+    setVideoTrack(null);
+    setRemoteAudio([]);
     setUnanswered(false);
     setDoorbellJoined(false);
     setReconnecting(false);
@@ -200,18 +209,24 @@ export function useLiveView(token, deviceId) {
     room.on(RoomEvent.TrackSubscribed, (track) => {
       if (track.kind === Track.Kind.Video && videoRef.current) {
         track.attach(videoRef.current);
-        setHasVideo(true);
+        setVideoTrack(track.mediaStreamTrack);
         answered();
       }
       // Audio is attached to its own element rather than the video one,
       // so the doorbell keeps being audible even before any video
       // arrives - hearing someone is the part that matters at a door.
-      if (track.kind === Track.Kind.Audio && audioRef.current) track.attach(audioRef.current);
+      if (track.kind === Track.Kind.Audio && audioRef.current) {
+        track.attach(audioRef.current);
+        setRemoteAudio((list) => [...list, track.mediaStreamTrack]);
+      }
     });
 
     room.on(RoomEvent.TrackUnsubscribed, (track) => {
       track.detach();
-      if (track.kind === Track.Kind.Video) setHasVideo(false);
+      if (track.kind === Track.Kind.Video) setVideoTrack(null);
+      if (track.kind === Track.Kind.Audio) {
+        setRemoteAudio((list) => list.filter((t) => t !== track.mediaStreamTrack));
+      }
     });
 
     // Our own link wobbling is the third way the picture can stop, and it
@@ -235,8 +250,9 @@ export function useLiveView(token, deviceId) {
       roomRef.current = null;
       clearTimeout(answerTimer.current);
       setPhase(IDLE);
-      setTalking(false);
-      setHasVideo(false);
+      setMic(null);
+      setVideoTrack(null);
+      setRemoteAudio([]);
       setUnanswered(false);
       setDoorbellJoined(false);
       setReconnecting(false);
@@ -336,7 +352,7 @@ export function useLiveView(token, deviceId) {
     const giveUp = () => {
       track?.stop();
       if (floorResult.status === 'fulfilled') api.releaseTalk(token, deviceId).catch(() => {});
-      setTalking(false);
+      setMic(null);
     };
 
     if (micResult.status === 'rejected' || floorResult.status === 'rejected') {
@@ -360,7 +376,7 @@ export function useLiveView(token, deviceId) {
         room.localParticipant.unpublishTrack(track).catch(() => {});
         return;
       }
-      setTalking(true);
+      setMic(track);
     } catch (err) {
       micTrack.current = null;
       giveUp();
@@ -380,9 +396,14 @@ export function useLiveView(token, deviceId) {
       if (room) await room.localParticipant.unpublishTrack(track).catch(() => {});
       track.stop();
     }
-    setTalking(false);
+    setMic(null);
     await api.releaseTalk(token, deviceId).catch(() => {});
   }, [token, deviceId]);
+
+  // Our microphone joins the mix only while it is open - it is stopped
+  // outright on release, not muted - so a recording has both sides of the
+  // conversation and nothing from the hallway in between.
+  const audioTracks = useMemo(() => (mic ? [...remoteAudio, mic] : remoteAudio), [mic, remoteAudio]);
 
   return {
     phase,
@@ -396,6 +417,10 @@ export function useLiveView(token, deviceId) {
     doorbellJoined,
     reconnecting,
     talking,
+    // What useLiveRecording records. Plain MediaStreamTracks, owned by the
+    // call: a recording reads them and never stops them.
+    videoTrack,
+    audioTracks,
     videoRef,
     audioRef,
     start,

@@ -16,6 +16,12 @@ import {
 } from '../controllers/deviceController.js';
 import { listEvents, createEvent } from '../controllers/eventController.js';
 import { getClipUrl } from '../controllers/clipController.js';
+import {
+  createRecording,
+  confirmRecording,
+  takeRecordingTurn,
+  releaseRecordingTurn
+} from '../controllers/recordingController.js';
 import { getViewerToken, takeTalk, releaseTalk } from '../controllers/mediaController.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireDeviceAccess, requireDeviceOwner } from '../middleware/deviceAccess.js';
@@ -73,6 +79,17 @@ deviceRoutes.post('/:deviceId/events', requireDeviceAccess, createEvent);
 // the browser fetches from the bucket and this server stays out of the
 // path for recorded media as well as live.
 deviceRoutes.get('/:deviceId/events/:eventId/clip', requireDeviceAccess, getClipUrl);
+
+// Recording from the live view. /record is the turn - one member at a
+// time, first press holds it - and /recordings is the upload: same three
+// steps as a doorbell's clip -
+// grant, PUT to the bucket, confirm - but asked for by a member's browser,
+// which is the only thing holding the picture while a call is up. Any
+// member may record; confirm only accepts the grant the caller was given.
+deviceRoutes.post('/:deviceId/record', requireDeviceAccess, takeRecordingTurn);
+deviceRoutes.delete('/:deviceId/record', requireDeviceAccess, releaseRecordingTurn);
+deviceRoutes.post('/:deviceId/recordings', requireDeviceAccess, createRecording);
+deviceRoutes.post('/:deviceId/recordings/:eventId/confirm', requireDeviceAccess, confirmRecording);
 
 // Live view and talk. All three are membership-gated by
 // requireDeviceAccess, which is half of what makes removing someone

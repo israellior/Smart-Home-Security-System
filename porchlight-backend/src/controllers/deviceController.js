@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { Device } from '../models/Device.js';
 import { Membership } from '../models/Membership.js';
-import { Event } from '../models/Event.js';
+import { Event, ALERT_RANKS } from '../models/Event.js';
 import { Clip } from '../models/Clip.js';
 import { storageConfigured, deleteClipObjects } from '../config/storage.js';
 import { generateShareCode, normalizeShareCode } from '../utils/shareCode.js';
@@ -76,7 +76,12 @@ async function newEventCountsByDevice(memberships) {
     .map((m) => ({
       device: m.device._id,
       // Never looked means everything counts as new.
-      receivedAt: { $gt: m.lastSeenAt || new Date(0) }
+      receivedAt: { $gt: m.lastSeenAt || new Date(0) },
+      // Alerts, not recordings. Someone saving a clip from the live view
+      // has not told anybody that a person is at the door. Filtered after
+      // the range seek rather than indexed: recordings are a sliver of
+      // the rows the seek already reads.
+      kindRank: { $in: ALERT_RANKS }
     }));
 
   if (branches.length === 0) return new Map();
