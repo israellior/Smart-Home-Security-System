@@ -95,6 +95,14 @@ resource "aws_iam_openid_connect_provider" "github" {
   client_id_list = ["sts.amazonaws.com"]
 }
 
+locals {
+  github_owner = split("/", var.github_repository)[0]
+  github_name  = split("/", var.github_repository)[1]
+  # Exactly what GitHub puts in `sub` - read off a rejected attempt in
+  # CloudTrail, where the userName field records the subject presented.
+  github_oidc_subject = "repo:${local.github_owner}@${var.github_owner_id}/${local.github_name}@${var.github_repository_id}:environment:production"
+}
+
 resource "aws_iam_role" "deploy" {
   name = "porchlight-github-deploy"
   assume_role_policy = jsonencode({
@@ -110,7 +118,7 @@ resource "aws_iam_role" "deploy" {
           # Not a branch pattern: anyone can push a branch to a fork and
           # open a PR, but only this repo's settings decide which
           # branches may use the environment (main, in infra/README.md).
-          "token.actions.githubusercontent.com:sub" = "repo:${var.github_repository}:environment:production"
+          "token.actions.githubusercontent.com:sub" = local.github_oidc_subject
         }
       }
     }]

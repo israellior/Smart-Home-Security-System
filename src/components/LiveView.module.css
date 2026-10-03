@@ -33,28 +33,268 @@
   opacity: 1;
 }
 
-.overlay {
+/*
+ * What the stage says while there is no picture. It sits on the video
+ * ground, which is the camera's black in both themes, so it takes the
+ * evening palette outright - day-porch ink here would be close to
+ * invisible.
+ */
+.status {
+  --ink: var(--evening-ink);
+  --muted: var(--evening-muted);
+  --brass: var(--evening-brass);
+  --ember: var(--evening-ember);
+  --line: var(--evening-line);
+
   position: absolute;
   inset: 0;
   display: flex;
-  /* A column because this can now hold a message and a button under it -
-     the doorbell that was asked and did not answer. */
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 16px;
+  padding: 20px;
   text-align: center;
+  color: var(--ink);
+  animation: statusIn 280ms ease both;
+}
+
+/* A faint glow behind the icon, in the colour of what is happening. It is
+   what keeps a black rectangle from reading as a broken one. */
+.tone_busy {
+  background: radial-gradient(
+    ellipse at 50% 40%,
+    color-mix(in srgb, var(--brass) 12%, transparent),
+    transparent 60%
+  );
+}
+
+.tone_bad {
+  background: radial-gradient(
+    ellipse at 50% 40%,
+    color-mix(in srgb, var(--ember) 10%, transparent),
+    transparent 60%
+  );
+}
+
+.statusIcon {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 14px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--brass);
+  background: color-mix(in srgb, var(--brass) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--brass) 38%, transparent);
+}
+
+.statusIcon svg {
+  position: relative;
+}
+
+.tone_bad .statusIcon {
+  color: var(--ember);
+  background: color-mix(in srgb, var(--ember) 14%, transparent);
+  border-color: color-mix(in srgb, var(--ember) 40%, transparent);
+}
+
+.tone_quiet .statusIcon {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  border-color: var(--line);
+}
+
+/* Two rings, half a cycle apart, so there is always one going out - a
+   doorbell being called, rather than a spinner that could mean anything. */
+.pulse {
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  border: 1px solid var(--brass);
+  animation: pulse 2.4s cubic-bezier(0.2, 0.6, 0.3, 1) infinite;
+}
+
+.pulseLate {
+  animation-delay: 1.2s;
+}
+
+.statusTitle {
+  font-family: var(--font-display);
+  font-size: 18px;
+  line-height: 1.25;
+  margin: 0 0 4px;
+}
+
+.statusDetail {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+  max-width: 280px;
+  margin: 0;
+}
+
+.steps {
+  list-style: none;
+  display: flex;
+  gap: 8px;
+  margin: 18px 0 0;
+  padding: 0;
+}
+
+.step,
+.stepDone,
+.stepNow {
+  width: 76px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+}
+
+.stepBar {
+  position: relative;
+  width: 100%;
+  height: 3px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--line);
+}
+
+.stepDone .stepBar {
+  background: var(--brass);
+}
+
+/* The current step is indeterminate - there is no honest percentage for
+   "the doorbell is waking up" - so it sweeps rather than fills. */
+.stepNow .stepBar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  border-radius: 2px;
+  background: var(--brass);
+  animation: sweep 1.4s ease-in-out infinite;
+}
+
+.stepLabel {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  opacity: 0.65;
+  white-space: nowrap;
+}
+
+.stepDone .stepLabel {
+  opacity: 1;
+}
+
+.stepNow .stepLabel {
+  color: var(--ink);
+  opacity: 1;
+}
+
+/* Full screen has the room for it, and is held at arm's length. */
+.stageFull .statusIcon {
+  width: 72px;
+  height: 72px;
+  margin-bottom: 18px;
+}
+
+.stageFull .statusTitle {
+  font-size: 22px;
+}
+
+.stageFull .statusDetail {
+  font-size: 14px;
+}
+
+.stageFull .step,
+.stageFull .stepDone,
+.stageFull .stepNow {
+  width: 88px;
+}
+
+/* Small inline stages - a phone in portrait - lose the explanation line
+   before they lose the progress, which is the part that says something
+   is still happening. */
+@media (max-width: 380px) {
+  .wrap .statusDetail {
+    display: none;
+  }
 }
 
 /*
- * The one button that lives inside the overlay, for the doorbell that was
- * asked and did not answer. Deliberately not the same weight as the
- * primary control below the stage: it sits on the video ground, which is
- * dark in both themes, so it borrows the full-screen palette rather than
- * whichever theme is showing.
+ * Pills over the picture. Their own dark, blurred ground rather than the
+ * theme's, because they sit on whatever the camera sees - a white wall at
+ * noon as easily as a dark porch.
+ */
+.liveBadge,
+.reconnecting {
+  position: absolute;
+  top: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px 5px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--video-ground) 62%, transparent);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  color: var(--evening-ink);
+  font-size: 11px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.liveBadge {
+  left: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.liveDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--evening-ember);
+  animation: liveDot 1.8s ease-out infinite;
+}
+
+.reconnecting {
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+}
+
+/* Level with the middle of the close button, which is 40px tall. */
+.liveBadgeFull,
+.stageFull .reconnecting {
+  top: calc(21px + env(safe-area-inset-top));
+}
+
+.liveBadgeFull {
+  left: 14px;
+}
+
+.spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--evening-ink) 30%, transparent);
+  border-top-color: var(--evening-ink);
+  animation: spin 0.8s linear infinite;
+}
+
+/*
+ * The one button that lives on the stage - Try again, for the doorbell
+ * that did not answer or the start that failed. Deliberately not the same
+ * weight as the primary control below the stage.
  */
 .overlayBtn {
-  margin-top: 12px;
+  margin-top: 16px;
   padding: 8px 18px;
   font-family: var(--font-body);
   font-size: 13px;
@@ -70,16 +310,75 @@
   color: var(--evening-brass);
 }
 
-.hint {
-  font-size: 13px;
-  color: var(--muted);
-  margin: 0;
+@keyframes statusIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
-.error {
-  font-size: 13px;
-  color: var(--ember);
-  margin: 0;
+@keyframes pulse {
+  from {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  /* Far enough to read as calling out, not so far that it washes over
+     the title underneath. */
+  to {
+    transform: scale(1.75);
+    opacity: 0;
+  }
+}
+
+@keyframes sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+@keyframes liveDot {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--evening-ember) 60%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status {
+    animation: none;
+  }
+
+  .pulse {
+    display: none;
+  }
+
+  .liveDot,
+  .spinner {
+    animation: none;
+  }
+
+  /* Still says "this one", without the motion. */
+  .stepNow .stepBar::after {
+    animation: none;
+    width: 100%;
+    opacity: 0.5;
+  }
 }
 
 .controls {
@@ -120,6 +419,9 @@
      touch both fight it. */
   user-select: none;
   -webkit-user-select: none;
+  /* iOS's long-press callout cancels the pointer mid-hold, which reads as
+     a release and drops the floor a second into speaking. */
+  -webkit-touch-callout: none;
   touch-action: none;
 }
 

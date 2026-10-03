@@ -15,3 +15,9 @@ import { EventEmitter } from 'node:events';
 export const eventBus = new EventEmitter();
 
 export const EVENT_INGESTED = 'event:ingested';
+
+// A clip finished uploading and is playable. Separate from EVENT_INGESTED
+// because it is not a new event - nobody should be notified, and a viewer
+// counting unread alerts must not count it - it only fills in one that is
+// already on screen.
+export const CLIP_STORED = 'clip:stored';

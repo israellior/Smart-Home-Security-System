@@ -41,6 +41,35 @@ const ERROR = 'error';
  */
 const ANSWER_TIMEOUT_MS = 18_000;
 
+/**
+ * What to tell someone whose microphone did not open.
+ *
+ * The browser's own wording is no help. WebKit's NotAllowedError says
+ * "possibly because the user denied permission" to people who were never
+ * asked, and the usual real cause on a phone is an in-app browser - a link
+ * opened from Gmail, WhatsApp or the Google app - that has no microphone
+ * permission to hand out.
+ */
+function micErrorMessage(err) {
+  switch (err?.name) {
+    case 'NotAllowedError':
+      // The Google app's built-in browser (GSA in its user agent) refuses
+      // without ever showing a prompt, so "allow it in your browser
+      // settings" would send people looking for a setting the page never
+      // offered them.
+      if (/\bGSA\//.test(navigator.userAgent)) {
+        return 'The Google app blocked the microphone. Open this page in Safari to talk, or turn on Microphone for Google in your iPhone Settings.';
+      }
+      return 'The microphone was blocked. Allow it for this site in your browser settings. If this page opened inside another app, open it in Safari or Chrome instead.';
+    case 'NotFoundError':
+      return 'No microphone was found on this device.';
+    case 'NotReadableError':
+      return 'The microphone is in use by another app.';
+    default:
+      return err?.message || 'The microphone could not be opened.';
+  }
+}
+
 export function useLiveView(token, deviceId) {
   const [phase, setPhase] = useState(IDLE);
   const [error, setError] = useState(null);
@@ -51,21 +80,39 @@ export function useLiveView(token, deviceId) {
   // nothing failed, and pressing the button again is a reasonable thing to
   // do about it.
   const [unanswered, setUnanswered] = useState(false);
+  // The doorbell is in the room but its picture has not arrived yet - the
+  // last stretch of a start, while the camera warms up and the first
+  // keyframe crosses. Lets the waiting screen say which part it is
+  // waiting for rather than one undifferentiated "Connecting".
+  const [doorbellJoined, setDoorbellJoined] = useState(false);
+  // Our own link dropped and LiveKit is bringing it back. The last frame
+  // stays up, so this is said over it rather than instead of it.
+  const [reconnecting, setReconnecting] = useState(false);
 
   const roomRef = useRef(null);
   const videoRef = useRef(null);
   const audioRef = useRef(null);
   const answerTimer = useRef(null);
+  // The open microphone while talking, and whether the button is still
+  // held. Refs, because both are read after awaits that a release can
+  // land in the middle of.
+  const micTrack = useRef(null);
+  const held = useRef(false);
 
   const detach = useCallback(() => {
     const room = roomRef.current;
     roomRef.current = null;
+    held.current = false;
+    micTrack.current?.stop();
+    micTrack.current = null;
     if (room) room.disconnect().catch(() => {});
     clearTimeout(answerTimer.current);
     setPhase(IDLE);
     setTalking(false);
     setHasVideo(false);
     setUnanswered(false);
+    setDoorbellJoined(false);
+    setReconnecting(false);
   }, []);
 
   // Leaving the page must close the connection. Without this the room
@@ -81,6 +128,7 @@ export function useLiveView(token, deviceId) {
   const start = useCallback(async () => {
     setError(null);
     setUnanswered(false);
+    setDoorbellJoined(false);
     setPhase(CONNECTING);
 
     let grant;
@@ -128,6 +176,7 @@ export function useLiveView(token, deviceId) {
     const answered = () => {
       clearTimeout(answerTimer.current);
       setUnanswered(false);
+      setDoorbellJoined(true);
     };
 
     // Re-armable, because the doorbell can also leave mid-call - a power
@@ -143,7 +192,9 @@ export function useLiveView(token, deviceId) {
     });
 
     room.on(RoomEvent.ParticipantDisconnected, (participant) => {
-      if (participant.identity === publisher) waitForAnswer();
+      if (participant.identity !== publisher) return;
+      setDoorbellJoined(false);
+      waitForAnswer();
     });
 
     room.on(RoomEvent.TrackSubscribed, (track) => {
@@ -165,7 +216,20 @@ export function useLiveView(token, deviceId) {
 
     // Our own link wobbling is the third way the picture can stop, and it
     // deserves the same window as the other two rather than a frozen frame.
-    room.on(RoomEvent.Reconnecting, waitForAnswer);
+    room.on(RoomEvent.Reconnecting, () => {
+      setReconnecting(true);
+      waitForAnswer();
+    });
+    // The clock was started on the way down, and comes off on the way back
+    // up only if the doorbell is still there - which, after a blip on our
+    // side, it almost always is.
+    room.on(RoomEvent.Reconnected, () => {
+      setReconnecting(false);
+      const stillThere = [...room.remoteParticipants.values()].some(
+        (p) => p.identity === publisher
+      );
+      if (stillThere) answered();
+    });
 
     room.on(RoomEvent.Disconnected, () => {
       roomRef.current = null;
@@ -174,6 +238,8 @@ export function useLiveView(token, deviceId) {
       setTalking(false);
       setHasVideo(false);
       setUnanswered(false);
+      setDoorbellJoined(false);
+      setReconnecting(false);
     });
 
     try {
@@ -247,22 +313,73 @@ export function useLiveView(token, deviceId) {
       return;
     }
 
+    held.current = true;
+
+    /*
+     * The microphone is asked for before anything is awaited, so the
+     * request happens while the press is still a press. Browsers that
+     * gate the microphone on a user gesture see one; the floor request
+     * runs alongside rather than in front, which also takes a network
+     * round trip off the time to the first word.
+     */
+    const mic = navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+    });
+    const floor = api.takeTalk(token, deviceId);
+    const [micResult, floorResult] = await Promise.allSettled([mic, floor]);
+    const track = micResult.value?.getAudioTracks()[0];
+
+    // Whichever half succeeded is undone if the other did not, or if the
+    // button was let go while both were in flight. Either one left behind
+    // is a cost to somebody: a floor nobody can use locks everyone else
+    // out, and a stray microphone is a microphone left open.
+    const giveUp = () => {
+      track?.stop();
+      if (floorResult.status === 'fulfilled') api.releaseTalk(token, deviceId).catch(() => {});
+      setTalking(false);
+    };
+
+    if (micResult.status === 'rejected' || floorResult.status === 'rejected') {
+      giveUp();
+      setError(
+        micResult.status === 'rejected'
+          ? micErrorMessage(micResult.reason)
+          : floorResult.reason.message
+      );
+      return;
+    }
+    if (!held.current || roomRef.current !== room) return giveUp();
+
     try {
-      await api.takeTalk(token, deviceId);
-      await room.localParticipant.setMicrophoneEnabled(true);
+      micTrack.current = track;
+      await room.localParticipant.publishTrack(track, { source: Track.Source.Microphone });
+      // Released during the publish: stopTalking stopped the track and
+      // gave the floor back, but its unpublish raced this publish and may
+      // have found nothing to take down.
+      if (!held.current) {
+        room.localParticipant.unpublishTrack(track).catch(() => {});
+        return;
+      }
       setTalking(true);
     } catch (err) {
+      micTrack.current = null;
+      giveUp();
       setError(err.message);
-      // Hand the floor back rather than holding one we cannot use - a
-      // denied microphone would otherwise lock everyone else out.
-      api.releaseTalk(token, deviceId).catch(() => {});
-      setTalking(false);
     }
   }, [phase, token, deviceId]);
 
   const stopTalking = useCallback(async () => {
+    held.current = false;
     const room = roomRef.current;
-    if (room) await room.localParticipant.setMicrophoneEnabled(false).catch(() => {});
+    const track = micTrack.current;
+    micTrack.current = null;
+    // Unpublished and stopped rather than muted: a muted track still holds
+    // the microphone open, and the phone's recording indicator stays on
+    // for as long as the call does.
+    if (track) {
+      if (room) await room.localParticipant.unpublishTrack(track).catch(() => {});
+      track.stop();
+    }
     setTalking(false);
     await api.releaseTalk(token, deviceId).catch(() => {});
   }, [token, deviceId]);
@@ -276,6 +393,8 @@ export function useLiveView(token, deviceId) {
     // keys on this and on hasVideo, never on deviceOnline - which only ever
     // said a frame was written to a socket.
     unanswered,
+    doorbellJoined,
+    reconnecting,
     talking,
     videoRef,
     audioRef,

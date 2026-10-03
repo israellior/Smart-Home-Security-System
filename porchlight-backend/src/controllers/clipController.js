@@ -1,5 +1,6 @@
 import { Clip } from '../models/Clip.js';
 import { ingestEvent, REJECTED } from '../services/events/ingestEvent.js';
+import { eventBus, CLIP_STORED } from '../services/events/eventBus.js';
 import {
   storageConfigured,
   signUpload,
@@ -157,7 +158,27 @@ export async function confirmUpload(req, res) {
   if (typeof durationMs === 'number') fields.durationMs = durationMs;
   if (partial !== undefined) fields.partial = Boolean(partial);
 
-  await Clip.updateOne({ device: hardware._id, eventId }, { $set: fields }, { upsert: true });
+  const stored = await Clip.findOneAndUpdate(
+    { device: hardware._id, eventId },
+    { $set: fields },
+    { upsert: true, new: true }
+  );
+
+  // Anyone looking at this alert right now is watching it say "clip on
+  // the way", and this is the moment that stops being true. Read back
+  // from the stored row rather than built from this request, because a
+  // re-confirm carries only what changed and the viewer needs all of it.
+  // Best-effort like the event push: the device's 204 must not depend on
+  // whether a browser was listening.
+  try {
+    eventBus.emit(CLIP_STORED, {
+      device: hardware,
+      eventId,
+      clip: { durationMs: stored.durationMs, partial: stored.partial, bytes: stored.bytes }
+    });
+  } catch (err) {
+    console.error(`Clip-ready push failed for ${eventId}:`, err.message);
+  }
 
   // 204 deliberately: the uploader is judged purely by its exit code and
   // reads no body, so there is nothing useful to send and no reason to
