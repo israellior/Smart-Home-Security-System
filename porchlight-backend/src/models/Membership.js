@@ -30,9 +30,10 @@ const membershipSchema = new mongoose.Schema(
     // Watermark for "new since you last looked". Everyone with access
     // sees every event, so there is no per-user read flag on events -
     // that would cost one row per member per event to store what this
-    // single timestamp says. Null means never opened, so everything is
-    // new. Unread count is then a range scan on { device, createdAt },
-    // an index Event already has.
+    // single timestamp says. Null means never opened, which counts from
+    // when this membership was made - see watermark() in deviceController.
+    // Unread count is then a range scan on { device, receivedAt }, an
+    // index Event already has.
     lastSeenAt: { type: Date, default: null }
   },
   { timestamps: true }

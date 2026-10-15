@@ -57,13 +57,30 @@ const NOTIFICATION_PREFS = ['notifMotion', 'notifRing', 'notifDaily'];
  * The share code is the credential that grants access to this doorbell,
  * so only the owner - the person entitled to hand out access - sees it.
  */
+/**
+ * Where "new to you" starts for one membership.
+ *
+ * Never having opened the activity list used to mean everything was new -
+ * so someone who joined a doorbell was greeted with its whole history as
+ * unread, a week of other people's motion alerts that were never news to
+ * them. Nothing from before you had access is new to you: until you first
+ * look, the watermark is the moment you joined.
+ *
+ * A fallback rather than a value written at join, so it holds for the
+ * memberships that already exist with no watermark, and there is one rule
+ * in one place instead of three Membership.create calls to keep in step.
+ */
+function watermark(membership) {
+  return membership.lastSeenAt || membership.createdAt || new Date(0);
+}
+
 function deviceForMember(device, membership) {
   const json = device.toJSON();
   if (membership.role !== 'owner') delete json.shareCode;
 
   for (const key of NOTIFICATION_PREFS) json[key] = membership[key];
   json.role = membership.role;
-  json.lastSeenAt = membership.lastSeenAt;
+  json.lastSeenAt = watermark(membership);
 
   // Derived rather than stored, because the stored form is a secret the
   // schema strips on the way out. "Is there hardware behind this?" is a
@@ -97,8 +114,7 @@ async function newEventCountsByDevice(memberships) {
     .filter((m) => m.device)
     .map((m) => ({
       device: m.device._id,
-      // Never looked means everything counts as new.
-      receivedAt: { $gt: m.lastSeenAt || new Date(0) },
+      receivedAt: { $gt: watermark(m) },
       // Alerts, not recordings. Someone saving a clip from the live view
       // has not told anybody that a person is at the door. Filtered after
       // the range seek rather than indexed: recordings are a sliver of

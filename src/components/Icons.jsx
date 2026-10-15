@@ -182,3 +182,13 @@ export function WifiIcon({ level = 3, ...props }) {
     </Icon>
   );
 }
+
+// Saved: a bookmark, filled when it is. One shape for both, so the toggle
+// reads as the same control changing state rather than two buttons.
+export function BookmarkIcon({ filled = false, ...props }) {
+  return (
+    <Icon {...props}>
+      <path d="M6.5 3.5h11v17l-5.5-4-5.5 4v-17Z" fill={filled ? 'currentColor' : 'none'} />
+    </Icon>
+  );
+}

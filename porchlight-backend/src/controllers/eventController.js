@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { Event } from '../models/Event.js';
+import { Event, RANK_BY_KIND, RETENTION_MS } from '../models/Event.js';
 import { Clip } from '../models/Clip.js';
+import { User } from '../models/User.js';
 import { ingestEvent, CREATED, REJECTED } from '../services/events/ingestEvent.js';
+import { retentionCutoff } from '../services/events/retention.js';
+import { eventBus, EVENT_SAVED } from '../services/events/eventBus.js';
 
 /**
  * Attaches clip metadata to a page of events.
@@ -44,6 +47,24 @@ async function withClips(events, deviceId) {
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
 
+/**
+ * What Activity's filters ask for. On the server rather than over the
+ * page the app already has, because a page is fifty rows: a busy doorbell's
+ * motion alerts can fill it, and "Saved" filtered client-side would be
+ * "saved, among the newest fifty" - missing exactly the old clips it exists
+ * to find.
+ *
+ * Each is a filter after the { device, at } seek rather than an index of
+ * its own: retention keeps a doorbell to a week of rows plus what it saved,
+ * so the scan behind any of these is short.
+ */
+const FILTERS = {
+  ring: { kindRank: RANK_BY_KIND.ring },
+  motion: { kindRank: RANK_BY_KIND.motion },
+  live: { kindRank: RANK_BY_KIND.live },
+  saved: { savedAt: { $ne: null } }
+};
+
 // A cursor pins an exact position in the { at desc, _id desc } ordering.
 // Both halves are needed: `at` alone would skip or repeat events sharing
 // a timestamp, which is exactly what happens when a motion detector fires
@@ -80,15 +101,33 @@ export async function listEvents(req, res) {
   const requested = Number.parseInt(req.query.limit, 10);
   const limit = Math.min(Number.isNaN(requested) ? DEFAULT_LIMIT : Math.max(requested, 1), MAX_LIMIT);
 
-  const query = { device: req.device._id };
+  const filter = req.query.filter || 'all';
+  if (filter !== 'all' && !FILTERS[filter]) {
+    return res.status(400).json({ error: `Unknown filter "${filter}"` });
+  }
+
+  const query = { device: req.device._id, ...FILTERS[filter] };
+  const conditions = [];
+
+  // Saved, or still inside the week. The sweep deletes the rest within the
+  // hour; this is what makes them disappear on time rather than then.
+  if (filter !== 'saved') {
+    conditions.push({
+      $or: [{ savedAt: { $ne: null } }, { receivedAt: { $gte: retentionCutoff() } }]
+    });
+  }
 
   if (req.query.before) {
     const cursor = decodeCursor(req.query.before);
     if (!cursor) return res.status(400).json({ error: 'Invalid cursor' });
     // Strictly "older than the cursor": earlier timestamp, or the same
     // timestamp with a lower id.
-    query.$or = [{ at: { $lt: cursor.at } }, { at: cursor.at, _id: { $lt: cursor.id } }];
+    conditions.push({
+      $or: [{ at: { $lt: cursor.at } }, { at: cursor.at, _id: { $lt: cursor.id } }]
+    });
   }
+
+  if (conditions.length > 0) query.$and = conditions;
 
   // One extra row tells us whether another page exists without a second
   // countDocuments over the whole collection.
@@ -106,9 +145,59 @@ export async function listEvents(req, res) {
 
   return res.json({
     events: await withClips(events, req.device._id),
-    nextCursor
+    nextCursor,
+    // So the app can say how long things are kept, and know when unsaving
+    // an old row would delete it, without a copy of the number to drift.
+    retentionMs: RETENTION_MS
   });
 }
+
+/**
+ * Keep a row past the week, or stop keeping it.
+ *
+ * Idempotent both ways - saving a saved row answers with it as it is, and
+ * keeps whoever saved it first - so a double tap or a retry is harmless.
+ * Addressed by the device's eventId, like the clip it is usually about.
+ *
+ * Unsaving a row older than a week makes it due at once: listEvents stops
+ * returning it and the next sweep deletes it and its clip. The app asks
+ * before doing that, because it cannot be undone.
+ */
+async function setSaved(req, res, saved) {
+  const { eventId } = req.params;
+  const where = { device: req.device._id, eventId };
+
+  let update;
+  if (saved) {
+    const me = await User.findById(req.userId, { name: 1 }).lean();
+    update = { savedAt: new Date(), savedBy: { id: String(req.userId), name: me?.name ?? null } };
+  } else {
+    update = { savedAt: null, savedBy: null };
+  }
+
+  // The guard on savedAt is what makes a repeat a no-op rather than a
+  // second write - and what stops a second "save" renaming who saved it.
+  const changed = await Event.findOneAndUpdate(
+    { ...where, savedAt: saved ? null : { $ne: null } },
+    { $set: update },
+    { new: true }
+  );
+  const event = changed || (await Event.findOne(where));
+  if (!event) return res.status(404).json({ error: 'No such event on this doorbell' });
+
+  if (changed) {
+    // Best-effort, like every push: the save happened either way.
+    try {
+      eventBus.emit(EVENT_SAVED, { device: req.device, event });
+    } catch (err) {
+      console.error(`Save push failed for ${eventId}:`, err.message);
+    }
+  }
+  return res.json({ event: event.toJSON() });
+}
+
+export const saveEvent = (req, res) => setSaved(req, res, true);
+export const unsaveEvent = (req, res) => setSaved(req, res, false);
 
 /**
  * The HTTP way in. Still behind a *user's* token, so this is the app's

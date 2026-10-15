@@ -21,3 +21,7 @@ export const EVENT_INGESTED = 'event:ingested';
 // counting unread alerts must not count it - it only fills in one that is
 // already on screen.
 export const CLIP_STORED = 'clip:stored';
+
+// Somebody saved or unsaved a row. Its own frame rather than a re-sent
+// `event`, because the app counts every `event` as news and this is not.
+export const EVENT_SAVED = 'event:saved';

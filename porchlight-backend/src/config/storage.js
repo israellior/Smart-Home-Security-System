@@ -243,13 +243,35 @@ export async function promoteUpload(deviceId, eventId) {
   return to;
 }
 
+// Deletes in flight at once. A doorbell being deleted or a week of clips
+// expiring can be hundreds of objects, and one request each all at once is
+// a burst R2 has no reason to enjoy.
+const DELETE_CONCURRENCY = 16;
+
+/**
+ * Removes every object an event can have - its clip and any upload that
+ * never got confirmed - and returns how many deletes failed.
+ *
+ * One DeleteObject per key rather than a batch DeleteObjects: the batch
+ * call requires a checksum header, and the client above is configured
+ * precisely so that nothing adds one (see requestChecksumCalculation).
+ * Deleting a key that does not exist succeeds, so asking for both is free.
+ */
 export async function deleteClipObjects(deviceId, eventIds) {
   const s3 = requireClient();
-  await Promise.allSettled(
-    eventIds.flatMap((eventId) =>
-      [clipKey(deviceId, eventId), pendingKey(deviceId, eventId)].map((Key) =>
-        s3.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key }))
-      )
-    )
-  );
+  const keys = eventIds.flatMap((eventId) => [
+    clipKey(deviceId, eventId),
+    pendingKey(deviceId, eventId)
+  ]);
+
+  let failed = 0;
+  for (let i = 0; i < keys.length; i += DELETE_CONCURRENCY) {
+    const results = await Promise.allSettled(
+      keys
+        .slice(i, i + DELETE_CONCURRENCY)
+        .map((Key) => s3.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key })))
+    );
+    failed += results.filter((r) => r.status === 'rejected').length;
+  }
+  return failed;
 }

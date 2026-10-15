@@ -1,7 +1,12 @@
 import { WebSocketServer } from 'ws';
 import { Device } from '../models/Device.js';
 import { ingestEvent, REJECTED } from '../services/events/ingestEvent.js';
-import { eventBus, EVENT_INGESTED, CLIP_STORED } from '../services/events/eventBus.js';
+import {
+  eventBus,
+  EVENT_INGESTED,
+  CLIP_STORED,
+  EVENT_SAVED
+} from '../services/events/eventBus.js';
 import { authenticate } from './authenticate.js';
 import {
   talkFloorBus,
@@ -387,6 +392,17 @@ export function attachSignaling(server) {
       for (const socket of registry.browserSockets(String(device._id))) send(socket, payload);
     } catch (err) {
       console.error('Clip-ready push failed:', err.message);
+    }
+  });
+
+  // A row saved or unsaved, so everyone else's Activity shows it - and
+  // shows its "deleted in two days" going away - without a reload.
+  eventBus.on(EVENT_SAVED, ({ device, event }) => {
+    try {
+      const payload = { type: 'event-saved', event: event.toJSON() };
+      for (const socket of registry.browserSockets(String(device._id))) send(socket, payload);
+    } catch (err) {
+      console.error('Save push failed:', err.message);
     }
   });
 

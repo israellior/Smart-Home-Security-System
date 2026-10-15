@@ -69,13 +69,15 @@ register/login.
 | GET    | `/devices/:id`          (auth)| One device (must be a member)       |
 | PATCH  | `/devices/:id`          (auth)| Update name/location/sensitivity (shared by all members) |
 | PATCH  | `/devices/:id/preferences` (auth) | Your own notification preferences for this device |
-| POST   | `/devices/:id/seen`     (auth)| Mark the activity list as read (moves your watermark) |
+| POST   | `/devices/:id/seen`     (auth)| Mark the activity list as read (moves your watermark; until the first time, it is when you joined) |
 | DELETE | `/devices/:id`          (auth)| Delete a device — **owner only**, cascades events + memberships |
 | GET    | `/devices/:id/members`  (auth)| Who has access, and in what role    |
 | DELETE | `/devices/:id/members/:userId` (auth) | Remove someone (owner) or leave (yourself) |
-| GET    | `/devices/:deviceId/events` (auth) | Events, newest first. `?limit=` (max 100) and `?before=<cursor>` |
+| GET    | `/devices/:deviceId/events` (auth) | Events, newest first: the last week plus anything saved. `?filter=ring\|motion\|live\|saved`, `?limit=` (max 100), `?before=<cursor>` |
 | POST   | `/devices/:deviceId/events` (auth) | Log an event: `{ type, meta, eventId?, at? }` → `{ event, outcome }` |
 | GET    | `/devices/:deviceId/events/:eventId/clip` (auth) | Short-lived signed URL to play a clip |
+| PUT    | `/devices/:deviceId/events/:eventId/saved` (auth) | Keep it past the week, for everyone on the doorbell → `{ event }` |
+| DELETE | `/devices/:deviceId/events/:eventId/saved` (auth) | Stop keeping it. Past the week, that deletes it within the hour |
 | POST   | `/devices/:deviceId/record` (auth) | Take the recording turn - one member at a time, **first press holds**; 409 names the holder |
 | DELETE | `/devices/:deviceId/record` (auth) | Give it back — holder only |
 | POST   | `/devices/:deviceId/recordings` (auth) | `{ bytes, durationMs }` → `{ eventId, url, … }`, a PUT grant for a live-view recording |
@@ -413,6 +415,38 @@ well inside R2's free operation allowance.
 Keys are derived from `(deviceId, eventId)`, never stored. Storing them would
 be a second source of truth for where a file lives, and the two would disagree
 the first time the layout changed.
+
+### A week, unless somebody saves it
+
+Activity keeps seven days of what nobody saved (`RETENTION_MS` in
+`models/Event.js`). After that the row, its clip object and its `Clip` record
+are deleted by `services/events/retention.js`, which runs a couple of minutes
+after start and then hourly. `listEvents` stops returning a row the moment it
+is due, so nothing lingers on screen for the hour before the sweep.
+
+- **Counted from `receivedAt`, not `at`**, so a doorbell's alerts held through
+  a long outage still get their full week.
+- **Nothing was deleted on day one.** Rows from before retention began
+  (`RETENTION_STARTS`, 2026-10-15) count their week from then, so the backlog
+  could be looked through and saved first. Inert after 2026-10-22.
+- **Saving is per doorbell, not per person** — the clip is one object for the
+  whole household. `savedAt` and a snapshot of `savedBy` live on the Event.
+  Saves and unsaves are pushed as an `event-saved` frame, not `event`, so they
+  never count as unread.
+- **A sweep of ours, not a lifecycle rule or a TTL index.** Neither can see
+  the other: a bucket rule would delete saved clips with the rest, and a TTL
+  index would delete the rows and leave their videos in the bucket. The sweep
+  deletes rows first, guarded by `savedAt: null`, reads back which survived,
+  and only then deletes objects for the rows that went — so a Save pressed
+  mid-sweep keeps its file. A failed object delete leaves a few megabytes
+  nobody can see, and is logged.
+- One index serves it: `{ savedAt, receivedAt }`. Deletes go one key at a
+  time, sixteen in flight; R2's batch DeleteObjects wants a checksum header
+  the client is configured not to send.
+
+Every event in the API carries `expiresAt` (null when saved), and the list
+carries `retentionMs`, so the app shows "Deleted tomorrow" and asks before an
+unsave that would delete something without keeping its own copy of the number.
 
 ### Playback
 

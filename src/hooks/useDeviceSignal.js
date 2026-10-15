@@ -22,6 +22,9 @@ export function useDeviceSignal(token, deviceId) {
   // it fills in an alert that is already listed, and anything counting
   // unread events off lastEvent must not count it as a new one.
   const [lastClip, setLastClip] = useState(null);
+  // A row somebody saved or unsaved - the whole event as it now stands.
+  // Apart from lastEvent for the same reason as lastClip: it is not news.
+  const [lastSaved, setLastSaved] = useState(null);
   // Who is recording the live view, `{ userId, name }` or null. Pushed on
   // every change, so only one person is ever offered the Rec button.
   const [recorder, setRecorder] = useState(null);
@@ -41,6 +44,7 @@ export function useDeviceSignal(token, deviceId) {
     setConnected(null);
     setLastEvent(null);
     setLastClip(null);
+    setLastSaved(null);
     setRecorder(null);
     setTalker(null);
     setRssi(null);
@@ -95,6 +99,9 @@ export function useDeviceSignal(token, deviceId) {
           case 'clip':
             setLastClip({ eventId: frame.eventId, clip: frame.clip });
             break;
+          case 'event-saved':
+            setLastSaved(frame.event);
+            break;
           case 'record-floor':
             setRecorder(frame.recorder ?? null);
             break;
@@ -134,5 +141,5 @@ export function useDeviceSignal(token, deviceId) {
     };
   }, [token, deviceId]);
 
-  return { connected, lastEvent, lastClip, recorder, talker, rssi };
+  return { connected, lastEvent, lastClip, lastSaved, recorder, talker, rssi };
 }
