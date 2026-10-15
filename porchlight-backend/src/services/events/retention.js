@@ -1,4 +1,4 @@
-import { Event, RETENTION_MS, RETENTION_STARTS } from '../../models/Event.js';
+import { Event, RETENTION_MS } from '../../models/Event.js';
 import { Clip } from '../../models/Clip.js';
 import { Device } from '../../models/Device.js';
 import { storageConfigured, deleteClipObjects } from '../../config/storage.js';
@@ -26,15 +26,8 @@ const FIRST_SWEEP_AFTER_MS = 2 * 60 * 1000;
 
 const BATCH = 500;
 
-/**
- * The oldest `receivedAt` an unsaved row may have and still be shown.
- *
- * Nothing at all is due until the grace week after RETENTION_STARTS is
- * over: until then the only rows old enough to be past their own week
- * arrived before retention began, and those are given until it ends.
- */
+/** The oldest `receivedAt` an unsaved row may have and still be shown. */
 export function retentionCutoff(now = Date.now()) {
-  if (now < RETENTION_STARTS.getTime() + RETENTION_MS) return new Date(0);
   return new Date(now - RETENTION_MS);
 }
 

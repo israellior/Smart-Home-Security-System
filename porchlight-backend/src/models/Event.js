@@ -48,24 +48,6 @@ export const ALERT_RANKS = ALERT_KINDS.map((kind) => RANK_BY_KIND[kind]);
  */
 export const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
-/**
- * When retention began. Everything that arrived before it counts its week
- * from here instead, so the deploy that introduced deleting did not delete
- * a backlog nobody had yet been able to save - saving arrived in the same
- * deploy, and rows past the week would have vanished before anyone could.
- *
- * Inert from RETENTION_STARTS + RETENTION_MS onward (2026-10-22): by then
- * every row's own week is the later one. It can be deleted after that,
- * along with its uses in expiryFor() below and retentionCutoff().
- */
-export const RETENTION_STARTS = new Date('2026-10-15T12:00:00Z');
-
-/** When a row received at `receivedAt` is due, saved or not. */
-export function expiryFor(receivedAt) {
-  const from = Math.max(receivedAt.getTime(), RETENTION_STARTS.getTime());
-  return new Date(from + RETENTION_MS);
-}
-
 const savedBySchema = new mongoose.Schema(
   { id: { type: String, required: true }, name: { type: String, default: null } },
   { _id: false }
@@ -133,7 +115,7 @@ eventSchema.virtual('type').get(function () {
  */
 eventSchema.virtual('expiresAt').get(function () {
   if (this.savedAt || !this.receivedAt) return null;
-  return expiryFor(this.receivedAt);
+  return new Date(this.receivedAt.getTime() + RETENTION_MS);
 });
 
 // Dedupe, and the reason retries are safe. The device resends the same

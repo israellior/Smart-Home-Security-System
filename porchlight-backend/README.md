@@ -426,9 +426,6 @@ is due, so nothing lingers on screen for the hour before the sweep.
 
 - **Counted from `receivedAt`, not `at`**, so a doorbell's alerts held through
   a long outage still get their full week.
-- **Nothing was deleted on day one.** Rows from before retention began
-  (`RETENTION_STARTS`, 2026-10-15) count their week from then, so the backlog
-  could be looked through and saved first. Inert after 2026-10-22.
 - **Saving is per doorbell, not per person** — the clip is one object for the
   whole household. `savedAt` and a snapshot of `savedBy` live on the Event.
   Saves and unsaves are pushed as an `event-saved` frame, not `event`, so they
