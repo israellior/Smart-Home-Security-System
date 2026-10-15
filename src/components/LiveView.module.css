@@ -5,7 +5,10 @@
 .stage {
   position: relative;
   width: 100%;
-  aspect-ratio: 4 / 3; /* the camera's 640x480 - no letterboxing */
+  /* The call's 640x360. This was 4:3 from the days of a 640x480 test
+     pattern, and with `cover` below it cut a quarter of the doorstep off
+     the sides of a 16:9 camera. */
+  aspect-ratio: 16 / 9;
   background: var(--video-ground);
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -226,14 +229,56 @@
 }
 
 /*
+ * The strip along the top of the picture: what is happening on the left
+ * (Live, who is watching), what you can do on the right. One row, so the
+ * two sides share a baseline instead of each guessing at the other's
+ * height.
+ */
+.topBar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px;
+  /* The bar spans the picture but only its buttons take taps; the rest
+     of it is the picture, and in full screen a tap there shows or hides
+     the controls. */
+  pointer-events: none;
+}
+
+.topBarFull {
+  padding: calc(12px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 12px
+    calc(12px + env(safe-area-inset-left));
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tools {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  pointer-events: auto;
+}
+
+/*
  * Pills over the picture. Their own dark, blurred ground rather than the
  * theme's, because they sit on whatever the camera sees - a white wall at
  * noon as easily as a dark porch.
  */
 .liveBadge,
+.viewers,
+.weakSignal,
 .reconnecting {
-  position: absolute;
-  top: 10px;
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -245,11 +290,9 @@
   color: var(--evening-ink);
   font-size: 11px;
   line-height: 1;
-  pointer-events: none;
 }
 
 .liveBadge {
-  left: 10px;
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -273,20 +316,76 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Names, not a count - see Viewers in LiveView.jsx. Truncated rather than
+   wrapped, so a long name cannot push the pill down over the picture. */
+.viewers {
+  max-width: min(260px, 60vw);
+}
+
+.viewers > svg {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.viewerNames {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewerName svg {
+  display: inline;
+  vertical-align: -1px;
+  margin-right: 2px;
+  color: var(--evening-brass);
+}
+
+.viewerMore {
+  color: var(--evening-muted);
+}
+
+.weakSignal {
+  color: var(--evening-ember);
+}
+
 .reconnecting {
+  position: absolute;
+  top: 50%;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
   font-size: 12px;
 }
 
-/* Level with the middle of the close button, which is 40px tall. */
-.liveBadgeFull,
-.stageFull .reconnecting {
-  top: calc(21px + env(safe-area-inset-top));
+/* A round button on the picture: full screen, fit or fill, close. The
+   same blurred ground as the pills, for the same reason. */
+.tool {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--evening-ink) 18%, transparent);
+  background: color-mix(in srgb, var(--video-ground) 62%, transparent);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  color: var(--evening-ink);
+  cursor: pointer;
 }
 
-.liveBadgeFull {
-  left: 14px;
+.tool:hover {
+  border-color: var(--evening-brass);
+  color: var(--evening-brass);
+}
+
+.topBarFull .tool {
+  width: 40px;
+  height: 40px;
+}
+
+.closeGlyph {
+  font-size: 24px;
+  line-height: 1;
 }
 
 .spinner {
@@ -548,8 +647,6 @@
   position: fixed;
   inset: 0;
   z-index: 60;
-  display: flex;
-  flex-direction: column;
   margin: 0;
 
   --bg: var(--evening-bg);
@@ -565,54 +662,136 @@
   color: var(--ink);
 }
 
+/* The whole screen is the picture now; the controls float over it. */
 .stageFull {
-  flex: 1;
-  /* The screen's shape now, not the camera's. */
+  position: absolute;
+  inset: 0;
   aspect-ratio: auto;
-  min-height: 0;
   border: none;
   border-radius: 0;
 }
 
-/* Inline the stage is already 4:3, so cover crops nothing. Full screen
-   it would crop hard - a phone in portrait is nowhere near the camera's
-   shape - and the cropped strip is exactly the part of a doorstep you
-   opened this to see. */
+/* Inline the stage is already the picture's shape, so cover crops
+   nothing. Full screen it would crop hard - a phone in portrait is nowhere
+   near 16:9 - and the cropped strip is exactly the part of a doorstep you
+   opened this to see. So fit is the default, and fill is a button. */
 .stageFull .video {
   object-fit: contain;
 }
 
-.close {
+.stageFull .videoFill {
+  object-fit: cover;
+}
+
+/* Clear of the top bar and the dock, which sit over the same ground. */
+.stageFull .status {
+  padding: calc(64px + env(safe-area-inset-top)) 20px calc(128px + env(safe-area-inset-bottom));
+}
+
+/*
+ * The controls, over the bottom of the picture. The gradient is what keeps
+ * white text legible on a bright doorstep without boxing the buttons in.
+ */
+.dock {
   position: absolute;
-  top: calc(12px + env(safe-area-inset-top));
-  right: 12px;
-  z-index: 1;
-  width: 40px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font: inherit;
-  font-size: 24px;
-  line-height: 1;
-  border-radius: 50%;
-  border: 1px solid var(--line);
-  /* Over the picture, so it needs its own ground to stay legible on a
-     bright frame. */
-  background: color-mix(in srgb, var(--bg) 72%, transparent);
-  color: var(--ink);
-  cursor: pointer;
-  padding: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 40px calc(20px + env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom))
+    calc(20px + env(safe-area-inset-left));
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--video-ground) 82%, transparent),
+    color-mix(in srgb, var(--video-ground) 45%, transparent) 60%,
+    transparent
+  );
 }
 
 .controlsFull {
   width: 100%;
   max-width: 420px;
   margin: 0 auto;
-  padding: 14px 20px calc(6px + env(safe-area-inset-bottom));
-  box-sizing: border-box;
+}
+
+/* The buttons sit on the picture, so they get a ground of their own. */
+.controlsFull .primary,
+.controlsFull .secondary,
+.controlsFull .talk:not(.talkOn),
+.controlsFull .record:not(.recordOn) {
+  background: color-mix(in srgb, var(--video-ground) 55%, transparent);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
 }
 
 .noteFull {
-  padding: 0 20px calc(16px + env(safe-area-inset-bottom));
+  margin-top: 10px;
+}
+
+/* Fading out of the way. Still in the page, so a keyboard can reach it -
+   and focusing anything in it brings it back. */
+.chrome {
+  transition: opacity 220ms ease;
+}
+
+.chromeHidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cursorHidden {
+  cursor: none;
+}
+
+/*
+ * A phone held sideways. There is a third of the height there is upright,
+ * so everything over the picture gets smaller and the explanation under a
+ * waiting screen goes - the progress is the part that matters.
+ */
+@media (orientation: landscape) and (max-height: 540px) {
+  .topBarFull {
+    padding-top: calc(8px + env(safe-area-inset-top));
+  }
+
+  .topBarFull .tool {
+    width: 36px;
+    height: 36px;
+  }
+
+  .dock {
+    padding-top: 24px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom));
+  }
+
+  .controlsFull {
+    max-width: 480px;
+  }
+
+  .controlsFull .primary,
+  .controlsFull .secondary,
+  .controlsFull .talk,
+  .controlsFull .record {
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+
+  .stageFull .status {
+    padding-top: calc(48px + env(safe-area-inset-top));
+    padding-bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+
+  .stageFull .statusIcon {
+    width: 52px;
+    height: 52px;
+    margin-bottom: 10px;
+  }
+
+  .stageFull .statusDetail {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chrome {
+    transition: none;
+  }
 }

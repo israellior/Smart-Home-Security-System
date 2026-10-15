@@ -32,7 +32,10 @@ export const TALK_FLOOR_CHANGED = 'talk:floor';
 // explicit request-and-release model has and this one should not.
 const FLOOR_TTL_MS = 60 * 1000;
 
-const floors = new Map(); // deviceKey -> { userId, deviceId, since, timer }
+// `identity` is the LiveKit participant holding it - one of `userId`'s
+// sessions, since the same person can be watching from two places and
+// only the one pressing the button should get the microphone.
+const floors = new Map(); // deviceKey -> { userId, identity, deviceId, since, timer }
 
 function clear(deviceKey) {
   const held = floors.get(deviceKey);
@@ -55,17 +58,19 @@ export function whoIsTalking(deviceKey) {
  * two microphones are live - a doorbell with two people talking into it
  * at once is worse than a moment of silence during the handover.
  */
-export async function takeFloor(deviceKey, deviceId, userId) {
+export async function takeFloor(deviceKey, deviceId, userId, identity) {
   const held = floors.get(deviceKey);
 
-  if (held && held.userId === userId) {
+  if (held && held.identity === identity) {
     // Re-pressing while already holding it just extends the turn.
     clearTimeout(held.timer);
-    held.timer = setTimeout(() => releaseFloor(deviceKey, userId), FLOOR_TTL_MS);
+    held.timer = setTimeout(() => releaseFloor(deviceKey, userId, identity), FLOOR_TTL_MS);
     return { userId, alreadyHeld: true };
   }
 
-  if (held) await setCanTalk(deviceId, held.userId, false);
+  // Including when it is the same person on another of their screens:
+  // that one's microphone is revoked like anybody else's.
+  if (held) await setCanTalk(deviceId, held.identity, false);
   clear(deviceKey);
 
   // Throws if the grant did not land, which leaves the floor held by
@@ -74,12 +79,13 @@ export async function takeFloor(deviceKey, deviceId, userId) {
   // is one the next press can take, whereas recording this viewer as the
   // holder would have blocked everyone else for the full TTL while the
   // one person "holding" it had no microphone.
-  await setCanTalk(deviceId, userId, true);
+  await setCanTalk(deviceId, identity, true);
   floors.set(deviceKey, {
     userId,
+    identity,
     deviceId,
     since: new Date(),
-    timer: setTimeout(() => releaseFloor(deviceKey, userId), FLOOR_TTL_MS)
+    timer: setTimeout(() => releaseFloor(deviceKey, userId, identity), FLOOR_TTL_MS)
   });
 
   announce(deviceKey, userId);
@@ -89,13 +95,19 @@ export async function takeFloor(deviceKey, deviceId, userId) {
 /**
  * Give it up. Only the holder can, so a stale release from someone who
  * was cut off cannot silence whoever took it from them.
+ *
+ * `identity` narrows that to one session when the caller knows it: the
+ * late release from a phone must not silence the same person, who has
+ * since pressed Talk on their laptop. Without it, any of the holder's
+ * sessions may release - which is what a closed tab needs.
  */
-export async function releaseFloor(deviceKey, userId) {
+export async function releaseFloor(deviceKey, userId, identity = null) {
   const held = floors.get(deviceKey);
   if (!held || held.userId !== userId) return false;
+  if (identity && held.identity !== identity) return false;
 
   clear(deviceKey);
-  await setCanTalk(held.deviceId, userId, false);
+  await setCanTalk(held.deviceId, held.identity, false);
   announce(deviceKey, null);
   return true;
 }
@@ -127,7 +139,7 @@ export function releaseIfHeld(deviceKey, userId) {
 export function releaseWhoeverHolds(deviceKey) {
   const held = floors.get(deviceKey);
   if (!held) return;
-  releaseFloor(deviceKey, held.userId).catch((err) => {
+  releaseFloor(deviceKey, held.userId, held.identity).catch((err) => {
     console.error(`Could not release talk floor on ${deviceKey}:`, err.message);
   });
 }

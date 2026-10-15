@@ -1,10 +1,10 @@
 /**
  * A counter with a window on it. Nothing more.
  *
- * Used by the claim endpoint, which is the one route in the app where a
- * short secret is submitted by an anonymous-ish guess: a six-character
- * claim code is 887 million values, which is far too many to type and not
- * many at all to script.
+ * Used by the claim endpoint, where a short secret is submitted by an
+ * anonymous-ish guess: a six-character claim code is 887 million values,
+ * which is far too many to type and not many at all to script. Login and
+ * register use it too, for the same reason with a human-chosen secret.
  *
  * In memory, and deliberately no Redis. It is the same single-process
  * assumption presence and the talk floor already make, and it is worth
@@ -14,8 +14,9 @@
  * makes guessing uneconomic is the keyspace plus the code being consumed
  * on first use; this is the layer that stops someone from walking the
  * keyspace in an afternoon. Trading a hard guarantee for no new
- * infrastructure is the right side of that line here, and would not be if
- * this were guarding a password.
+ * infrastructure is the right side of that line here. For passwords it is
+ * closer: with N servers a guesser gets N times the login budget, and the
+ * day there are several, these buckets belong in the database or Redis.
  *
  * Fixed windows, not sliding: a burst straddling a boundary can get 2x
  * the limit, which for a control whose job is to turn "millions of
@@ -72,6 +73,22 @@ export function consume(name, key, { limit, windowMs }) {
     remaining: Math.max(0, limit - entry.count),
     retryAfterMs: allowed ? 0 : entry.resetAt - now
   };
+}
+
+/**
+ * Asks whether `name`/`key` is already over its limit, without charging
+ * for asking. For callers that only charge failures but must still turn
+ * a caller away *before* doing the expensive check - login, where the
+ * check is a bcrypt compare and refusing after it would hand a guesser
+ * the CPU anyway.
+ */
+export function peek(name, key, { limit }) {
+  const entry = buckets.get(name)?.get(key);
+  const now = Date.now();
+  if (!entry || entry.resetAt <= now) return { allowed: true, retryAfterMs: 0 };
+
+  const allowed = entry.count < limit;
+  return { allowed, retryAfterMs: allowed ? 0 : entry.resetAt - now };
 }
 
 /** Forgets one key - what a success calls, so it costs nothing later. */

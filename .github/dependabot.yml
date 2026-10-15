@@ -1,0 +1,59 @@
+# Weekly update PRs for everything this repo pins.
+#
+# Into development, not main: a merge to main deploys (deploy-api.yml), so
+# updates take the same road as any other change. Security updates are the
+# exception - GitHub always opens those against the default branch.
+#
+# Minor and patch bumps are grouped into one PR per ecosystem so a quiet week
+# is one PR to read rather than a dozen. Majors stay separate, because those
+# are the ones that need reading.
+version: 2
+
+updates:
+  # The frontend (Vite + React), built by Cloudflare Workers Builds.
+  - package-ecosystem: npm
+    directory: /
+    target-branch: development
+    schedule:
+      interval: weekly
+    groups:
+      frontend-minor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /porchlight-backend
+    target-branch: development
+    schedule:
+      interval: weekly
+    groups:
+      backend-minor:
+        update-types: [minor, patch]
+
+  # The API's base image, pinned by digest in the Dockerfile. Without this
+  # the pin would freeze it on whatever Node had on the day it was written.
+  - package-ecosystem: docker
+    directory: /porchlight-backend
+    target-branch: development
+    schedule:
+      interval: weekly
+
+  # Caddy, pinned by digest in compose.yaml.
+  - package-ecosystem: docker-compose
+    directory: /infra/server
+    target-branch: development
+    schedule:
+      interval: weekly
+
+  # Actions are pinned to commit SHAs; Dependabot keeps the SHA and the
+  # version comment beside it in step.
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: development
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: terraform
+    directory: /infra/terraform
+    target-branch: development
+    schedule:
+      interval: weekly

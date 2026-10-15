@@ -1,5 +1,7 @@
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
+export const SESSION_ENDED = 'porchlight:session-ended';
+
 async function request(path, { method = 'GET', body, token } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -12,6 +14,17 @@ async function request(path, { method = 'GET', body, token } = {}) {
 
   // 204 No Content (delete, leave) has no body to parse.
   const data = res.status === 204 ? {} : await res.json().catch(() => ({}));
+
+  // A 401 on a request that carried a token means the session is over -
+  // expired, or ended by "sign out everywhere" on another device. Said
+  // once, here, so AuthContext can sign this tab out instead of every
+  // page showing its own error against a session that will never work
+  // again. A 401 without a token is a wrong password, and stays local.
+  // The token rides along so a slow request from an old session cannot
+  // sign out the new one.
+  if (res.status === 401 && token) {
+    window.dispatchEvent(new CustomEvent(SESSION_ENDED, { detail: { token } }));
+  }
 
   if (!res.ok) {
     const err = new Error(data.error || `Request failed (${res.status})`);
@@ -33,6 +46,8 @@ export const api = {
   register: (payload) => request('/auth/register', { method: 'POST', body: payload }),
   login: (payload) => request('/auth/login', { method: 'POST', body: payload }),
   me: (token) => request('/auth/me', { token }),
+  signOutEverywhere: (token) =>
+    request('/auth/sign-out-everywhere', { method: 'POST', token }),
 
   listDevices: (token) => request('/devices', { token }),
   getDevice: (token, id) => request(`/devices/${id}`, { token }),
@@ -102,6 +117,11 @@ export const api = {
       token
     }),
 
-  takeTalk: (token, deviceId) => request(`/devices/${deviceId}/talk`, { method: 'POST', token }),
-  releaseTalk: (token, deviceId) => request(`/devices/${deviceId}/talk`, { method: 'DELETE', token })
+  // `identity` is this tab's participant in the call. The floor goes to a
+  // session rather than a person, because the same person can be watching
+  // on two screens and only the one being pressed should open a microphone.
+  takeTalk: (token, deviceId, identity) =>
+    request(`/devices/${deviceId}/talk`, { method: 'POST', body: { identity }, token }),
+  releaseTalk: (token, deviceId, identity) =>
+    request(`/devices/${deviceId}/talk`, { method: 'DELETE', body: { identity }, token })
 };

@@ -102,6 +102,29 @@ button.glowRing:focus-visible {
   color: var(--brass);
 }
 
+/* Quieter than the status above it: it qualifies "connected", it is not
+   a second status. */
+.wifi {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 4px;
+}
+
+.wifiWeak {
+  color: var(--ember);
+}
+
+.wifiAdvice {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+  max-width: 300px;
+  margin: 0 auto 6px;
+}
+
 .deviceLocation {
   font-size: 13px;
   color: var(--muted);

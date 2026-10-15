@@ -119,9 +119,9 @@ export function useDevice() {
 }
 
 /**
- * The live socket for this doorbell: `connected`, and `lastEvent` for
- * pages that want events as they happen rather than as they were when
- * the page loaded.
+ * The live socket for this doorbell: `connected`, `lastEvent` for pages
+ * that want events as they happen rather than as they were when the page
+ * loaded, who is recording and talking, and the doorbell's Wi-Fi `rssi`.
  *
  * Separate from useDevice() so the pages that only render a device carry
  * on unchanged - only the one that wants live updates has to know a

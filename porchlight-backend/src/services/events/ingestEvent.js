@@ -46,6 +46,35 @@ function reject(reason) {
   return { outcome: REJECTED, reason, event: null };
 }
 
+const MAX_META_BYTES = 2048;
+
+/**
+ * `meta` is free-form and stored as given, so this is the one guard on
+ * it: a small, plain JSON object with keys Mongo will take.
+ *
+ * Anything else is dropped, not rejected - and that is rule 3 again. A
+ * rejection makes the device drop the alert for good, and losing a ring
+ * over an optional side field is the wrong way round. A `$` or `.` in a
+ * key is the case that matters most: Mongo refuses those inside an
+ * update, which would surface as a thrown error and have the device
+ * retry the same doomed write forever.
+ *
+ * Nothing sends meta today. This is so the first thing that does cannot
+ * store a hundred kilobytes per event, or wedge one.
+ */
+function isSafeMeta(meta) {
+  if (typeof meta !== 'object' || meta === null || Array.isArray(meta)) return false;
+  if (Buffer.byteLength(JSON.stringify(meta), 'utf8') > MAX_META_BYTES) return false;
+  return !hasUnsafeKey(meta);
+}
+
+function hasUnsafeKey(value) {
+  if (!value || typeof value !== 'object') return false;
+  return Object.entries(value).some(
+    ([key, inner]) => key.startsWith('$') || key.includes('.') || hasUnsafeKey(inner)
+  );
+}
+
 export async function ingestEvent({ device, eventId, kind, at, meta }) {
   // Alerts only. A `live` recording is made by the server on a member's
   // say-so, and accepting it here would let a doorbell file one.
@@ -58,6 +87,11 @@ export async function ingestEvent({ device, eventId, kind, at, meta }) {
 
   const firedAt = at instanceof Date ? at : new Date(at);
   if (Number.isNaN(firedAt.getTime())) return reject('`at` is not a valid timestamp');
+
+  if (meta != null && !isSafeMeta(meta)) {
+    console.warn(`Event ${eventId} from ${device.deviceId || device._id}: meta dropped (not a small plain object)`);
+    meta = undefined;
+  }
 
   const now = new Date();
 

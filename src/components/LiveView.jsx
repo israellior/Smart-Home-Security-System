@@ -1,9 +1,23 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useLiveView } from '../hooks/useLiveView';
 import { useLiveRecording } from '../hooks/useLiveRecording';
+import { wifiSignal } from '../lib/wifiSignal';
 import { useDeviceLive } from './DeviceLayout';
-import { AlertIcon, BellIcon, CameraIcon, CameraOffIcon, RecordIcon, WifiOffIcon } from './Icons';
+import {
+  AlertIcon,
+  BellIcon,
+  CameraIcon,
+  CameraOffIcon,
+  ExpandIcon,
+  EyeIcon,
+  FillIcon,
+  FitIcon,
+  MicIcon,
+  RecordIcon,
+  WifiIcon,
+  WifiOffIcon
+} from './Icons';
 import styles from './LiveView.module.css';
 
 /*
@@ -194,6 +208,66 @@ function Note({ live, rec, othersRecording, expanded }) {
   );
 }
 
+
+// How many names fit in the pill before the rest become a count. Three is
+// about what a phone's top bar holds beside the Live badge, and a doorbell
+// rarely has more people on it than that anyway.
+const NAMES_SHOWN = 3;
+
+/**
+ * Who is watching, over the picture.
+ *
+ * People rather than connections: the same person on a phone and a laptop
+ * is one name. "Just you" is said rather than the pill going away, because
+ * knowing nobody else is looking is half of what this is for - it is the
+ * difference between talking to a visitor and talking to a visitor with
+ * your family listening.
+ */
+function Viewers({ viewers, talker }) {
+  if (viewers.length === 0) return null;
+
+  const others = viewers.filter((v) => !v.isMe);
+  const named = viewers.map((v) => (v.isMe ? 'You' : v.name));
+  const label =
+    others.length === 0
+      ? 'Only you are watching'
+      : `Watching now: ${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
+
+  const shown = viewers.slice(0, NAMES_SHOWN);
+  const more = viewers.length - shown.length;
+
+  return (
+    <span className={styles.viewers} role="status" aria-label={label}>
+      <EyeIcon size={13} />
+      {others.length === 0 ? (
+        <span>Just you</span>
+      ) : (
+        <span className={styles.viewerNames} aria-hidden="true">
+          {shown.map((v, i) => (
+            <span key={v.userId} className={styles.viewerName}>
+              {i > 0 && ', '}
+              {/* Whose voice the doorbell is playing. Shown on the name,
+                  because "someone is talking" is less use than who. */}
+              {v.userId === talker && <MicIcon size={11} />}
+              {v.isMe ? 'You' : v.name}
+            </span>
+          ))}
+          {more > 0 && <span className={styles.viewerMore}> +{more}</span>}
+        </span>
+      )}
+    </span>
+  );
+}
+
+// How long full screen waits with nothing happening before the buttons get
+// out of the picture's way. Long enough to read them and reach for one.
+const CHROME_IDLE_MS = 3500;
+
+// A phone held sideways. Coarse pointer and a short screen, so a desktop
+// window that happens to be wider than it is tall never jumps into full
+// screen on its own.
+const PHONE_LANDSCAPE = '(orientation: landscape) and (pointer: coarse) and (max-height: 540px)';
+
 /**
  * The doorbell's camera, and the button that lets you answer it.
  *
@@ -208,14 +282,15 @@ function Note({ live, rec, othersRecording, expanded }) {
  * never reconnects, and the doorbell never sees a viewer leave and
  * rejoin because someone tapped the ring.
  */
-export function LiveView({ device, expanded = false, onCollapse }) {
+export function LiveView({ device, expanded = false, onExpand, onCollapse }) {
   const { token, user } = useAuth();
   const live = useLiveView(token, device._id);
   // Who holds the one recording turn, from the doorbell's socket. Only
   // somebody else holding it matters here - our own turn is already
   // known to useLiveRecording.
-  const { recorder } = useDeviceLive();
+  const { recorder, talker, rssi } = useDeviceLive();
   const othersRecording = recorder && recorder.userId !== user?.id ? recorder : null;
+  const signal = wifiSignal(rssi);
   // Fed from the call rather than from the <video>: the same tracks, but
   // these say when they change, and a recording has to follow voices as
   // they join and leave.
@@ -225,7 +300,12 @@ export function LiveView({ device, expanded = false, onCollapse }) {
     videoTrack: live.videoTrack,
     audioTracks: live.audioTracks
   });
+  const rootRef = useRef(null);
   const closeRef = useRef(null);
+  // Fit shows the whole picture with bars; fill crops to the screen. Only
+  // offered full screen, where the two differ - inline the stage is
+  // already the picture's shape.
+  const [fill, setFill] = useState(false);
 
   // "Dana is already recording" stops being true when Dana stops, and the
   // refusal should not outlive it.
@@ -292,35 +372,225 @@ export function LiveView({ device, expanded = false, onCollapse }) {
     };
   }, [expanded, onCollapse]);
 
+  /*
+   * The browser's own full screen, on top of ours, where there is one.
+   *
+   * The overlay alone fills the window but not the screen: on a phone the
+   * address bar and the system bars stay, and they are a fifth of a
+   * landscape screen. Asked for in the same moment as the tap that opened
+   * this, because browsers only grant it to a gesture.
+   *
+   * iPhone Safari has no full screen for anything but its own video
+   * player, which would take Talk and Rec away with it. There the overlay
+   * is the whole of it, and `requestFullscreen` being absent is how that
+   * is known - not a user-agent check.
+   *
+   * Leaving the browser's full screen - the back gesture, Escape, the
+   * system's own button - leaves ours too, or it would strand the overlay
+   * behind bars that just came back.
+   */
+  useEffect(() => {
+    if (!expanded) return undefined;
+    const el = rootRef.current;
+    if (!el?.requestFullscreen || document.fullscreenElement) return undefined;
+
+    let entered = false;
+    const onChange = () => {
+      if (document.fullscreenElement === el) entered = true;
+      else if (entered) onCollapse?.();
+    };
+    document.addEventListener('fullscreenchange', onChange);
+    // Refused without a fresh gesture - turning the phone sideways is not
+    // one - and the overlay is still a perfectly good full screen then.
+    el.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
+
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange);
+      if (document.fullscreenElement === el) document.exitFullscreen().catch(() => {});
+    };
+  }, [expanded, onCollapse]);
+
+  /*
+   * Turning the phone sideways while watching fills the screen, and
+   * turning it back undoes exactly that - but only that. Somebody who
+   * opened full screen on purpose and then turned the phone upright has
+   * not asked to leave.
+   *
+   * Only while a call is up: a phone turned on the doorbell's page is not
+   * a request to wake the camera.
+   */
+  const rotatedIn = useRef(false);
+  useEffect(() => {
+    if (!expanded) rotatedIn.current = false;
+  }, [expanded]);
+
+  useEffect(() => {
+    if (!onExpand || !window.matchMedia) return undefined;
+    const query = window.matchMedia(PHONE_LANDSCAPE);
+    const onTurn = () => {
+      if (query.matches && live.isLive && !expanded) {
+        rotatedIn.current = true;
+        onExpand();
+      } else if (!query.matches && expanded && rotatedIn.current) {
+        rotatedIn.current = false;
+        onCollapse?.();
+      }
+    };
+    query.addEventListener('change', onTurn);
+    return () => query.removeEventListener('change', onTurn);
+  }, [live.isLive, expanded, onExpand, onCollapse]);
+
+  /*
+   * Full screen's buttons step out of the picture after a few quiet
+   * seconds, the way any video player's do, and a tap brings them back.
+   *
+   * Never while they are the point: before there is a picture, while
+   * holding Talk, or while there is something on screen that has to be
+   * read or answered - a failed save in particular offers its only way
+   * out down there. The Live and Rec badges stay regardless; being
+   * recorded is not something to be unsure of because the controls
+   * happened to fade.
+   */
+  const canHide =
+    expanded &&
+    live.hasVideo &&
+    !live.talking &&
+    !live.error &&
+    !rec.failed &&
+    !rec.error &&
+    !rec.saving;
+  const [chromeShown, setChromeShown] = useState(true);
+  const hideTimer = useRef(null);
+
+  const showChrome = useCallback(() => {
+    setChromeShown(true);
+    clearTimeout(hideTimer.current);
+    hideTimer.current = setTimeout(() => setChromeShown(false), CHROME_IDLE_MS);
+  }, []);
+
+  useEffect(() => {
+    if (!canHide) {
+      clearTimeout(hideTimer.current);
+      setChromeShown(true);
+      return undefined;
+    }
+    showChrome();
+    return () => clearTimeout(hideTimer.current);
+  }, [canHide, showChrome]);
+
+  const chromeHidden = canHide && !chromeShown;
+
+  const onStageClick = (e) => {
+    if (!canHide || e.target.closest('button, a')) return;
+    if (chromeHidden) {
+      showChrome();
+    } else {
+      clearTimeout(hideTimer.current);
+      setChromeShown(false);
+    }
+  };
+
+  const fullHandlers = expanded
+    ? {
+        // A mouse moving is somebody looking for the buttons. A finger is
+        // not: it moves on its way to a tap, and the tap decides.
+        onPointerMove: (e) => e.pointerType === 'mouse' && canHide && showChrome(),
+        // Keyboard users tab into buttons they cannot see otherwise.
+        onFocus: () => canHide && showChrome()
+      }
+    : {};
+
+  const chromeClass = `${styles.chrome} ${chromeHidden ? styles.chromeHidden : ''}`;
+
+  const controls = (
+    <div className={`${styles.controls} ${expanded ? styles.controlsFull : ''}`}>
+      {!live.isLive ? (
+        <button
+          className={styles.primary}
+          type="button"
+          onClick={live.start}
+          disabled={live.isConnecting}
+        >
+          {live.isConnecting ? 'Connecting…' : 'View live'}
+        </button>
+      ) : (
+        <>
+          <button
+            className={`${styles.talk} ${live.talking ? styles.talkOn : ''}`}
+            type="button"
+            {...talkHandlers}
+          >
+            {live.talking ? 'Release to stop' : 'Hold to talk'}
+          </button>
+          {/* A toggle, unlike Talk: a recording is meant to run while you
+              do other things, including talking. It stops itself when the
+              picture goes and at the length limit, so it cannot be left
+              running by accident. */}
+          <button
+            className={`${styles.record} ${rec.recording ? styles.recordOn : ''}`}
+            type="button"
+            onClick={rec.recording ? rec.stop : rec.start}
+            disabled={
+              !rec.recording &&
+              (!live.hasVideo || rec.starting || rec.saving || rec.failed || Boolean(othersRecording))
+            }
+            aria-pressed={rec.recording}
+            aria-label={
+              rec.recording
+                ? `Stop recording, ${formatElapsed(rec.elapsedMs)} recorded`
+                : othersRecording
+                  ? `${othersRecording.name || 'Someone else'} is recording`
+                  : 'Record'
+            }
+          >
+            <RecordIcon size={16} />
+            {rec.recording
+              ? formatElapsed(rec.elapsedMs)
+              : rec.saving
+                ? 'Saving'
+                : rec.starting
+                  ? 'Rec…'
+                  : 'Rec'}
+          </button>
+          <button className={styles.secondary} type="button" onClick={live.stop}>
+            End
+          </button>
+        </>
+      )}
+    </div>
+  );
+
+  // Errors raised while live have to be shown here: the overlay on the
+  // stage only renders before the session is up, so a failed talk attempt
+  // would otherwise set an error that nothing on the page displays, and
+  // holding the button would look exactly like holding one that did
+  // nothing.
+  const note = <Note live={live} rec={rec} othersRecording={othersRecording} expanded={expanded} />;
+
   return (
     <div
-      className={expanded ? styles.full : styles.wrap}
+      ref={rootRef}
+      className={`${expanded ? styles.full : styles.wrap} ${
+        chromeHidden ? styles.cursorHidden : ''
+      }`}
       role={expanded ? 'dialog' : undefined}
       aria-modal={expanded ? 'true' : undefined}
       aria-label={expanded ? `${device.name}, live` : undefined}
+      {...fullHandlers}
     >
-      {expanded && (
-        <button
-          ref={closeRef}
-          className={styles.close}
-          type="button"
-          onClick={onCollapse}
-          aria-label="Leave full screen"
-        >
-          ×
-        </button>
-      )}
-
       <div
         className={`${styles.stage} ${live.isLive ? styles.stageLive : ''} ${
           expanded ? styles.stageFull : ''
         }`}
+        onClick={expanded ? onStageClick : undefined}
       >
         {/* Always mounted: the refs have to exist before a track arrives,
             and a track that arrives with nowhere to attach is silent. */}
         <video
           ref={live.videoRef}
-          className={`${styles.video} ${live.hasVideo ? styles.videoOn : ''}`}
+          className={`${styles.video} ${live.hasVideo ? styles.videoOn : ''} ${
+            expanded && fill ? styles.videoFill : ''
+          }`}
           autoPlay
           playsInline
           muted
@@ -329,20 +599,74 @@ export function LiveView({ device, expanded = false, onCollapse }) {
 
         {!live.hasVideo && <StageStatus live={live} deviceName={device.name} />}
 
-        {live.hasVideo && (
-          <span className={`${styles.liveBadge} ${expanded ? styles.liveBadgeFull : ''}`}>
-            <span className={styles.liveDot} aria-hidden="true" />
-            Live
-            {/* On the picture as well as on the button, because the
-                picture is where you are looking - and being recorded is
-                something the person holding the phone should never be
-                unsure of. */}
-            {rec.recording && (
-              <span className={styles.recTag}>Rec {formatElapsed(rec.elapsedMs)}</span>
+        <div className={`${styles.topBar} ${expanded ? styles.topBarFull : ''}`}>
+          <div className={styles.badges}>
+            {live.hasVideo && (
+              <span className={styles.liveBadge}>
+                <span className={styles.liveDot} aria-hidden="true" />
+                Live
+                {/* On the picture as well as on the button, because the
+                    picture is where you are looking - and being recorded is
+                    something the person holding the phone should never be
+                    unsure of. */}
+                {rec.recording && (
+                  <span className={styles.recTag}>Rec {formatElapsed(rec.elapsedMs)}</span>
+                )}
+                {othersRecording && <span className={styles.recTag}>Rec</span>}
+              </span>
             )}
-            {othersRecording && <span className={styles.recTag}>Rec</span>}
-          </span>
-        )}
+            {live.hasVideo && <Viewers viewers={live.viewers} talker={talker} />}
+            {/* Only when it is the likely reason the picture is struggling.
+                A good signal is the device page's to mention; here it would
+                be one more thing on top of somebody's front door. */}
+            {live.hasVideo && signal?.weak && (
+              <span className={styles.weakSignal} title={`${signal.rssi} dBm`}>
+                <WifiIcon size={13} level={signal.level} />
+                Weak Wi-Fi
+              </span>
+            )}
+          </div>
+
+          <div className={`${styles.tools} ${expanded ? chromeClass : ''}`}>
+            {expanded ? (
+              <>
+                {live.hasVideo && (
+                  <button
+                    className={styles.tool}
+                    type="button"
+                    onClick={() => setFill((f) => !f)}
+                    aria-pressed={fill}
+                    aria-label={fill ? 'Show the whole picture' : 'Fill the screen'}
+                  >
+                    {fill ? <FitIcon size={18} /> : <FillIcon size={18} />}
+                  </button>
+                )}
+                <button
+                  ref={closeRef}
+                  className={styles.tool}
+                  type="button"
+                  onClick={onCollapse}
+                  aria-label="Leave full screen"
+                >
+                  <span className={styles.closeGlyph} aria-hidden="true">
+                    ×
+                  </span>
+                </button>
+              </>
+            ) : (
+              onExpand && (
+                <button
+                  className={styles.tool}
+                  type="button"
+                  onClick={onExpand}
+                  aria-label={`Watch ${device.name} full screen`}
+                >
+                  <ExpandIcon size={17} />
+                </button>
+              )
+            )}
+          </div>
+        </div>
 
         {/* Over the frozen last frame rather than replacing it: the picture
             is still the most useful thing on screen, and it is about to
@@ -355,68 +679,19 @@ export function LiveView({ device, expanded = false, onCollapse }) {
         )}
       </div>
 
-      <div className={`${styles.controls} ${expanded ? styles.controlsFull : ''}`}>
-        {!live.isLive ? (
-          <button
-            className={styles.primary}
-            type="button"
-            onClick={live.start}
-            disabled={live.isConnecting}
-          >
-            {live.isConnecting ? 'Connecting…' : 'View live'}
-          </button>
-        ) : (
-          <>
-            <button
-              className={`${styles.talk} ${live.talking ? styles.talkOn : ''}`}
-              type="button"
-              {...talkHandlers}
-            >
-              {live.talking ? 'Release to stop' : 'Hold to talk'}
-            </button>
-            {/* A toggle, unlike Talk: a recording is meant to run while you
-                do other things, including talking. It stops itself when the
-                picture goes and at the length limit, so it cannot be left
-                running by accident. */}
-            <button
-              className={`${styles.record} ${rec.recording ? styles.recordOn : ''}`}
-              type="button"
-              onClick={rec.recording ? rec.stop : rec.start}
-              disabled={
-                !rec.recording &&
-                (!live.hasVideo || rec.starting || rec.saving || rec.failed || Boolean(othersRecording))
-              }
-              aria-pressed={rec.recording}
-              aria-label={
-                rec.recording
-                  ? `Stop recording, ${formatElapsed(rec.elapsedMs)} recorded`
-                  : othersRecording
-                    ? `${othersRecording.name || 'Someone else'} is recording`
-                    : 'Record'
-              }
-            >
-              <RecordIcon size={16} />
-              {rec.recording
-                ? formatElapsed(rec.elapsedMs)
-                : rec.saving
-                  ? 'Saving'
-                  : rec.starting
-                    ? 'Rec…'
-                    : 'Rec'}
-            </button>
-            <button className={styles.secondary} type="button" onClick={live.stop}>
-              End
-            </button>
-          </>
-        )}
-      </div>
-
-      {/* Errors raised while live have to be shown here: the overlay
-          above only renders before the session is up, so until now a
-          failed talk attempt set an error message that nothing on the
-          page could ever display, and holding the button looked exactly
-          like holding a button that did nothing. */}
-      <Note live={live} rec={rec} othersRecording={othersRecording} expanded={expanded} />
+      {/* Full screen lays the controls over the picture rather than under
+          it, so the picture can have the whole screen. */}
+      {expanded ? (
+        <div className={`${styles.dock} ${chromeClass}`}>
+          {controls}
+          {note}
+        </div>
+      ) : (
+        <>
+          {controls}
+          {note}
+        </>
+      )}
     </div>
   );
 }

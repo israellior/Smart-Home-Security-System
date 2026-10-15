@@ -111,25 +111,34 @@ export function clipKey(deviceId, eventId) {
 }
 
 /**
- * A grant to upload exactly one object.
+ * A grant to upload exactly one object, of exactly `bytes` bytes - or,
+ * with no `bytes`, of any size.
  *
- * `signableHeaders` is pinned to host alone. Anything else we sign here
- * becomes a header the device is required to send byte-for-byte, and the
- * device sends a fixed set we do not control. Content-Type rides in the
- * returned `headers` instead, which the uploader copies verbatim onto
- * the PUT.
+ * Signing Content-Length makes the grant good for that many bytes and no
+ * other - the bucket refuses anything else on signature alone. That is
+ * the whole of the size limit: a presigned PUT has no other way to say
+ * "no larger than". Both callers know the size before they ask - a
+ * doorbell's clip is finished before it is uploaded, and so is a
+ * recording from the live view - so neither has a reason to be given an
+ * open-ended grant.
  *
- * `bytes` is for a browser, which can be held to more. A recording from
- * the live view is finished before its grant is asked for, so its size is
- * known, and signing Content-Length makes the grant good for exactly that
- * many bytes - the bucket refuses anything else on signature alone. That
- * is the whole of the size limit: a presigned PUT has no other way to say
- * "no larger than". Content-Type is signed with it, because a browser
- * sends exactly what it is told to and a device's urllib is not involved.
+ * Anything signed becomes a header the client must send byte-for-byte,
+ * so the set is exactly what both clients already send and nothing
+ * more: Host, Content-Length (which urllib and fetch both compute from
+ * the body) and Content-Type (copied verbatim from the `headers` this
+ * returns). No checksum header - see the client options above.
+ *
+ * The open-ended form exists for one reason and should not outlive it:
+ * the doorbells in the field do not send their size yet. See
+ * createUploadUrl in clipController.js.
  */
 export async function signUpload(deviceId, eventId, { bytes } = {}) {
+  const sized = bytes !== undefined;
+  if (sized && (!Number.isInteger(bytes) || bytes <= 0)) {
+    throw new Error('signUpload was given a size that is not a positive integer');
+  }
+
   const key = pendingKey(deviceId, eventId);
-  const sized = typeof bytes === 'number';
   const url = await getSignedUrl(
     requireClient(),
     new PutObjectCommand({
@@ -140,7 +149,11 @@ export async function signUpload(deviceId, eventId, { bytes } = {}) {
     }),
     {
       expiresIn: UPLOAD_URL_TTL_SECONDS,
-      signableHeaders: new Set(sized ? ['host', 'content-length', 'content-type'] : ['host'])
+      signableHeaders: new Set(
+        // Unsized is exactly what production signed for a doorbell before
+        // this: host alone, so a device's uploader is held to nothing new.
+        sized ? ['host', 'content-length', 'content-type'] : ['host']
+      )
     }
   );
 

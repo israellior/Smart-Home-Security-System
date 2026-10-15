@@ -135,6 +135,22 @@ export function browserSockets(deviceKey) {
   return r ? [...r.browsers] : [];
 }
 
+/**
+ * Every browser socket a user has open, across all their doorbells. A
+ * walk of every room rather than an index: it runs only on "sign out
+ * everywhere", which is rare enough not to earn a second map to keep in
+ * step with this one.
+ */
+export function browserSocketsOfUser(userId) {
+  const found = [];
+  for (const r of rooms.values()) {
+    for (const socket of r.browsers) {
+      if (socket.ctx && String(socket.ctx.userId) === String(userId)) found.push(socket);
+    }
+  }
+  return found;
+}
+
 /** Is the *hardware* on the other end right now - not the media script. */
 export function isDeviceOnline(deviceKey) {
   return Boolean(rooms.get(deviceKey)?.[ROLE_DEVICE]);

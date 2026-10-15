@@ -12,3 +12,7 @@ npm-debug.log*
 
 # Wrangler's local state (Cloudflare Workers CLI)
 .wrangler/
+
+# Python bytecode - render-env.py leaves this behind when run locally.
+__pycache__/
+*.pyc

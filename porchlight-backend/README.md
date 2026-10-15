@@ -59,9 +59,10 @@ register/login.
 | Method | Path                          | Description                        |
 |--------|-------------------------------|-------------------------------------|
 | GET    | `/health`                     | Liveness check                      |
-| POST   | `/auth/register`              | `{ name, email, password }` → token |
-| POST   | `/auth/login`                 | `{ email, password }` → token       |
+| POST   | `/auth/register`              | `{ name, email, password }` → token. 10 per IP per hour |
+| POST   | `/auth/login`                 | `{ email, password }` → token. 10 failures per email / 30 per IP per 15 min, then 429 |
 | GET    | `/auth/me`             (auth) | Current user                        |
+| POST   | `/auth/sign-out-everywhere` (auth) | Bumps the user's `tokenVersion`: every token they hold, this one included, stops verifying; their open sockets close with 4002 |
 | GET    | `/devices`              (auth)| Devices you're a member of, each with your `role` |
 | POST   | `/devices`              (auth)| Create a device — you become its owner |
 | POST   | `/devices/join`         (auth)| `{ shareCode }` → join a device. **First joiner becomes its owner** |
@@ -85,7 +86,7 @@ register/login.
 | GET    | `/devices/:deviceId/self` (device) | What the Pi can see about itself. Device credential, not a JWT |
 | POST   | `/devices/:deviceId/media-token/publisher` (device) | Camera + mic up, cannot subscribe |
 | POST   | `/devices/:deviceId/media-token/listener` (device) | Subscribe only, publishes nothing |
-| POST   | `/clips/:eventId/upload-url` (device) | Empty body → a short-lived PUT grant |
+| POST   | `/clips/:eventId/upload-url` (device) | `{ bytes }` → a short-lived PUT grant for exactly that many bytes |
 | POST   | `/clips/:eventId/confirm`   (device) | `{ kind, at, durationMs, partial, bytes }` → 204 |
 
 Routes marked **(device)** authenticate with a *device credential*
@@ -282,7 +283,7 @@ Three steps, and the server is not in the middle of the one that carries
 bytes:
 
 ```
-1. POST /api/clips/<eventId>/upload-url   (device)  -> a short-lived PUT grant
+1. POST /api/clips/<eventId>/upload-url   (device)  -> a short-lived PUT grant, { bytes } in the body
 2. PUT  <that url>                                  -> straight to the bucket
 3. POST /api/clips/<eventId>/confirm      (device)  -> metadata, in the body
 ```
@@ -347,10 +348,15 @@ because of that:
 - `requestChecksumCalculation: 'WHEN_REQUIRED'` — since v3.729 the AWS SDK adds
   `x-amz-sdk-checksum-algorithm` to PutObject by default. If that lands in the
   signature, a client that doesn't send it fails **every** upload.
-- `signableHeaders: new Set(['host'])` — anything else signed becomes a header
-  the device is required to reproduce byte-for-byte, and we don't control what
-  it sends. `Content-Type` rides in the returned `headers` instead, which the
-  uploader copies verbatim.
+- `signableHeaders: new Set(['host', 'content-length', 'content-type'])` —
+  anything signed becomes a header the device is required to reproduce
+  byte-for-byte, so the set is exactly what urllib already sends. urllib
+  computes `Content-Length` from the body, and `Content-Type` comes from the
+  returned `headers`, which the uploader copies verbatim. Signing the length is
+  the size cap: step 1 takes the clip's size as `bytes` (at most 100MB), and the
+  bucket refuses a PUT of any other length. It was `['host']` alone until the
+  uploader sent its size; an unsized grant let one leaked credential store
+  objects of any size.
 
 From the server's side that failure is invisible: we generate a URL that looks
 perfectly good and the device sees a non-2xx it can only retry forever. Both
@@ -557,6 +563,16 @@ Two subtleties, both load-bearing:
   only clears an entry that is still its own. Without that guard a reconnect
   would report as a disconnect and flap the UI.
 
+### Wi-Fi signal
+
+The doorbell's bridge sends `{ type: 'link', rssi }` (dBm, or `null` for not
+on Wi-Fi) after every hello and then whenever it moves by 3 dB, sampled every
+30s. It is held in memory beside presence, forwarded to every browser on that
+doorbell as the same frame and included in a browser's `hello-ok`, and
+forgotten when the device's socket goes. Reports less than 5s apart are
+dropped, because each one fans out. The contract is in the device repo's
+`docs/server-brief.md`.
+
 ### Live updates
 
 New events are pushed to browsers watching that doorbell, so the activity list
@@ -583,8 +599,15 @@ two minutes long without costing a round trip.
 |---|---|---|---|
 | device publisher | `device:<id>:pub` | **camera + mic only** | **false** |
 | device listener | `device:<id>:sub` | false | true |
-| viewer | `user:<uid>` | false | true |
-| talker | `user:<uid>` | **microphone only** | true |
+| viewer | `user:<uid>:<session>` | false | true |
+| talker | `user:<uid>:<session>` | **microphone only** | true |
+
+**A viewer's identity is per session, not per person.** LiveKit allows one
+participant per identity in a room and disconnects the older one, so plain
+`user:<uid>` meant the same account on a phone and a laptop knocked each other
+out of the call. The person stays the prefix; that is what the device's
+`is_viewer()` and the app's "who is watching" read, and the token's `name` is
+the user's name so the other viewers can show it.
 
 **The Pi is two participants, not one**, and that leaks into the UI. The
 `:sub` half publishes nothing, ever — so anything asking "is the camera
@@ -627,6 +650,11 @@ Three details that matter more than they look:
   alternative is a floor nobody can take back. Only the holder may release,
   so a stale release from someone already cut off can't silence whoever took
   it from them.
+- **The floor belongs to a session.** `POST /talk` carries the browser's own
+  participant `identity`, checked to be one of the caller's; the grant goes to
+  that participant only. A socket dropping releases the floor only if that
+  person has no other tab open on the doorbell, since the browser socket
+  cannot say which session it was.
 
 Asking for a viewer token also sends `viewer-requested` to the doorbell —
 requesting a token *is* the intent to watch, and relying on the browser's own

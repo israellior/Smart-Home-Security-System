@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useReducer } from 'react';
-import { api } from '../api/client';
+import { api, SESSION_ENDED } from '../api/client';
 
 const AuthContext = createContext(null);
 
@@ -137,6 +137,25 @@ export function AuthProvider({ children }) {
     dispatch({ type: 'signed_out' });
   }, []);
 
+  // Every token this account holds dies, this tab's included, so this tab
+  // signs out as soon as the server says it is done.
+  const signOutEverywhere = useCallback(async () => {
+    await api.signOutEverywhere(token);
+    dispatch({ type: 'signed_out' });
+  }, [token]);
+
+  // Any request that comes back 401 on this session's token ends the
+  // session here too - which is how "sign out everywhere" reaches the
+  // other tabs and devices, at their next request rather than their next
+  // reload. Only the current token counts; see SESSION_ENDED in the client.
+  useEffect(() => {
+    const onSessionEnded = (event) => {
+      if (token && event.detail?.token === token) dispatch({ type: 'verification_failed' });
+    };
+    window.addEventListener(SESSION_ENDED, onSessionEnded);
+    return () => window.removeEventListener(SESSION_ENDED, onSessionEnded);
+  }, [token]);
+
   // `loading` is derived, not stored - it was only ever "we have a token
   // we haven't checked yet". Exposed under the old name so consumers
   // don't all have to change at once; `status` is the better thing to
@@ -144,7 +163,7 @@ export function AuthProvider({ children }) {
   const loading = status === 'checking';
 
   return (
-    <AuthContext.Provider value={{ status, token, user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ status, token, user, loading, login, register, logout, signOutEverywhere }}>
       {children}
     </AuthContext.Provider>
   );

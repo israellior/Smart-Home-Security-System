@@ -106,3 +106,79 @@ export function AlertIcon(props) {
     </Icon>
   );
 }
+
+export function EyeIcon(props) {
+  return (
+    <Icon {...props}>
+      <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" />
+      <circle cx="12" cy="12" r="2.8" />
+    </Icon>
+  );
+}
+
+export function MicIcon(props) {
+  return (
+    <Icon {...props}>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" />
+    </Icon>
+  );
+}
+
+// Four corners pointing out, and in: the two halves of one toggle, so
+// they are drawn as mirror images rather than as two unrelated glyphs.
+export function ExpandIcon(props) {
+  return (
+    <Icon {...props}>
+      <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+    </Icon>
+  );
+}
+
+export function ShrinkIcon(props) {
+  return (
+    <Icon {...props}>
+      <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+    </Icon>
+  );
+}
+
+// Fit and fill: the picture inside the frame, or spilling past it.
+export function FitIcon(props) {
+  return (
+    <Icon {...props}>
+      <rect x="2.5" y="4.5" width="19" height="15" rx="2" />
+      <rect x="6.5" y="8.5" width="11" height="7" rx="1" />
+    </Icon>
+  );
+}
+
+export function FillIcon(props) {
+  return (
+    <Icon {...props}>
+      <rect x="2.5" y="4.5" width="19" height="15" rx="2" />
+      <path d="M6.5 12h11M9 9.5 6.5 12 9 14.5M15 9.5l2.5 2.5-2.5 2.5" />
+    </Icon>
+  );
+}
+
+/**
+ * Wi-Fi with `level` of its three arcs lit, 0 to 3, over a dot that is
+ * always there. Unlit arcs are drawn faint rather than left out, so a weak
+ * signal reads as "one of three" and not as a smaller icon.
+ */
+export function WifiIcon({ level = 3, ...props }) {
+  const arcs = [
+    'M8.8 15.6a4.5 4.5 0 0 1 6.4 0',
+    'M5.6 12.4a9 9 0 0 1 12.8 0',
+    'M2.4 9.2a13.5 13.5 0 0 1 19.2 0'
+  ];
+  return (
+    <Icon {...props}>
+      {arcs.map((d, i) => (
+        <path key={d} d={d} opacity={i < level ? 1 : 0.28} />
+      ))}
+      <circle cx="12" cy="19" r="1" fill="currentColor" />
+    </Icon>
+  );
+}

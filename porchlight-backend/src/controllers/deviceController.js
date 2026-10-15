@@ -21,6 +21,28 @@ import { disconnectHardware } from '../signaling/index.js';
 // hardware reporting in should ever flip it.
 const EDITABLE_FIELDS = ['name', 'location', 'sensitivity'];
 
+// The same 40 the inputs in the app allow, so nobody using the app can
+// meet this limit - it is for requests that did not come from the app.
+const MAX_TEXT = 40;
+const SENSITIVITIES = ['low', 'standard', 'high'];
+
+/**
+ * Checks one editable field, returning an error message or null.
+ *
+ * Done here rather than left to the schema because a Mongoose
+ * ValidationError reaches the central handler as a 500 - "the server is
+ * broken" - when the truth is "you sent something we don't take".
+ */
+function invalidField(field, value) {
+  if (field === 'sensitivity') {
+    return SENSITIVITIES.includes(value) ? null : 'Sensitivity must be low, standard or high';
+  }
+  if (typeof value !== 'string') return `${field} must be text`;
+  if (value.trim().length > MAX_TEXT) return `${field} must be at most ${MAX_TEXT} characters`;
+  if (field === 'name' && !value.trim()) return 'A doorbell needs a name';
+  return null;
+}
+
 // Per-person, per-device. Set on the caller's Membership, not the Device.
 const NOTIFICATION_PREFS = ['notifMotion', 'notifRing', 'notifDaily'];
 
@@ -137,7 +159,14 @@ export async function getDevice(req, res) {
  * is gone with it: nothing is allocated at creation to collide.
  */
 export async function createDevice(req, res) {
-  const { name, location } = req.body;
+  const { name, location } = req.body || {};
+
+  // Absent is fine - the defaults below cover it. Present has to be valid.
+  for (const [field, value] of [['name', name], ['location', location]]) {
+    if (value === undefined || value === null || value === '') continue;
+    const error = invalidField(field, value);
+    if (error) return res.status(400).json({ error });
+  }
 
   const device = await Device.create({
     name: name?.trim() || 'Front Door',
@@ -416,8 +445,17 @@ export async function revokeShareCode(req, res) {
 export async function updateDevice(req, res) {
   const { device } = req;
 
+  const body = req.body || {};
+
+  // All checked before any is applied, so a bad field cannot leave the
+  // good ones half-written.
   for (const field of EDITABLE_FIELDS) {
-    if (field in req.body) device[field] = req.body[field];
+    if (!(field in body)) continue;
+    const error = invalidField(field, body[field]);
+    if (error) return res.status(400).json({ error });
+  }
+  for (const field of EDITABLE_FIELDS) {
+    if (field in body) device[field] = body[field];
   }
 
   await device.save();

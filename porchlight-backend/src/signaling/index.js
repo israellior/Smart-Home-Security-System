@@ -6,6 +6,7 @@ import { authenticate } from './authenticate.js';
 import {
   talkFloorBus,
   TALK_FLOOR_CHANGED,
+  whoIsTalking,
   releaseIfHeld,
   releaseWhoeverHolds
 } from '../services/media/talkFloor.js';
@@ -36,6 +37,7 @@ import {
 
 // A socket that connects and says nothing is either broken or probing.
 const HELLO_TIMEOUT_MS = 10_000;
+const MAX_FRAME_BYTES = 64 * 1024;
 
 // A doorbell that loses power does not close its socket - the TCP
 // connection simply stops answering, and without this the app would show
@@ -131,6 +133,40 @@ function broadcastPresence(deviceKey, connected) {
 }
 
 /**
+ * How strong the doorbell's Wi-Fi is, as it last reported.
+ *
+ * In memory, like presence, because it describes a connection this
+ * process is holding: it is reported over the socket, means nothing once
+ * the socket is gone, and is reported again on the next hello. Nothing
+ * reads it after the fact, so there is nothing to persist.
+ *
+ * `rssi` is dBm, or null for a doorbell that is not on Wi-Fi at all -
+ * a cable, or an interface the kernel does not report on.
+ */
+const links = new Map(); // deviceKey -> { rssi, at }
+
+// The bridge sends on a change of a few dB, at most every half minute.
+// Anything faster than this is not a doorbell reporting its signal, and
+// each frame fans out to every browser watching.
+const LINK_MIN_INTERVAL_MS = 5_000;
+
+function handleLink(socket, frame) {
+  const { deviceKey } = socket.ctx;
+  const rssi = frame.rssi;
+  if (rssi !== null && !(Number.isFinite(rssi) && rssi >= -120 && rssi <= 0)) return;
+
+  const now = Date.now();
+  const last = links.get(deviceKey);
+  if (last && now - last.at < LINK_MIN_INTERVAL_MS) return;
+
+  const value = rssi === null ? null : Math.round(rssi);
+  links.set(deviceKey, { rssi: value, at: now });
+  for (const browser of registry.browserSockets(deviceKey)) {
+    send(browser, { type: 'link', rssi: value });
+  }
+}
+
+/**
  * Tells the doorbell somebody wants to watch: stop recording and bring
  * up the call. Exported because the live-view endpoint is the natural
  * place to trigger it - a viewer who has asked for a token is a viewer
@@ -221,6 +257,21 @@ export function disconnectHardware(deviceKey, reason = 'Device removed') {
     socket.close(CLOSE_UNAUTHORIZED, reason);
   }
   pendingWatch.delete(deviceKey);
+  links.delete(deviceKey);
+}
+
+/**
+ * Closes every socket a person has open, for "sign out everywhere".
+ *
+ * 4002 because it is the truth - the token that socket was opened with no
+ * longer verifies - and because it is the code a browser does not
+ * reconnect on. Anything retryable would have it reconnect straight into
+ * a refusal.
+ */
+export function disconnectUser(userId, reason = 'Signed out') {
+  for (const socket of registry.browserSocketsOfUser(userId)) {
+    socket.close(CLOSE_UNAUTHORIZED, reason);
+  }
 }
 
 /**
@@ -243,7 +294,14 @@ export async function resetPresence() {
 }
 
 export function attachSignaling(server) {
-  const wss = new WebSocketServer({ server, path: '/signal' });
+  // maxPayload because the default is 100 MiB, and a socket may send
+  // before it has said who it is: without a cap, anyone on the internet
+  // could hand this process a 100 MiB frame to buffer and JSON.parse,
+  // repeatedly, inside the hello window. The largest real frame is a
+  // hello carrying a JWT, around a kilobyte - there is no SDP on this
+  // socket - so 64 KiB is generous. ws closes an oversized sender with
+  // 1009.
+  const wss = new WebSocketServer({ server, path: '/signal', maxPayload: MAX_FRAME_BYTES });
 
   wss.on('connection', (socket) => {
     socket.ctx = null;
@@ -439,11 +497,22 @@ async function handleHello(socket, frame) {
     // assuming offline until the next transition.
     connected: registry.isDeviceOnline(deviceKey),
     // Who is recording, for the same reason: a viewer arriving mid-recording
-    // should see the button taken, not find out by pressing it.
-    ...(role === ROLE_BROWSER && { recorder: whoIsRecording(deviceKey) })
+    // should see the button taken, not find out by pressing it. Who is
+    // talking and how good the doorbell's Wi-Fi is, likewise, so neither
+    // waits for its next change to be shown.
+    ...(role === ROLE_BROWSER && {
+      recorder: whoIsRecording(deviceKey),
+      talker: whoIsTalking(deviceKey),
+      rssi: links.get(deviceKey)?.rssi ?? null
+    })
   });
 
   if (role === ROLE_DEVICE) {
+    // A new connection reports its own signal straight after this. The
+    // old one's reading must not stand in the way: a reconnect that
+    // replaced its predecessor never ran the close that clears it, and
+    // its first report would land inside LINK_MIN_INTERVAL_MS of the last.
+    links.delete(deviceKey);
     await setConnected(device, true);
     broadcastPresence(deviceKey, true);
     // Last, and after presence: a viewer's browser should have the
@@ -466,6 +535,11 @@ async function routeFrame(socket, frame) {
     case 'watch':
       if (role !== ROLE_BROWSER) return;
       return handleWatch(socket);
+
+    case 'link':
+      // The daemon's bridge, which is the process on the network.
+      if (role !== ROLE_DEVICE) return;
+      return handleLink(socket, frame);
 
     case 'ping':
       return void send(socket, { type: 'pong' });
@@ -542,7 +616,15 @@ function handleClose(socket) {
   // ends. Without this the floor would sit held until someone else
   // pressed the button.
   if (role === ROLE_BROWSER && removed) {
-    releaseIfHeld(deviceKey, userId);
+    // Unless they are still here on another screen. Closing the laptop
+    // they were not talking on must not cut off the phone they are
+    // talking on; and if it was the phone that closed, nothing is lost by
+    // waiting - the floor expires on its own, and the next press takes it
+    // from whoever holds it anyway.
+    const stillHere = registry
+      .browserSockets(deviceKey)
+      .some((other) => String(other.ctx?.userId) === String(userId));
+    if (!stillHere) releaseIfHeld(deviceKey, userId);
     // The same for a recording: a closed tab has stopped recording.
     releaseRecordingIfHeld(deviceKey, userId && String(userId));
   }
@@ -555,6 +637,9 @@ function handleClose(socket) {
   if (role === ROLE_DEVICE && removed && !registry.isDeviceOnline(deviceKey)) {
     setConnected(device, false);
     broadcastPresence(deviceKey, false);
+    // A signal strength for a doorbell that is not there would be a claim
+    // about a connection that no longer exists.
+    links.delete(deviceKey);
 
     // The call is over from the doorbell's side whether or not the
     // viewers know yet - webrtc-video.py exits when the room empties or
