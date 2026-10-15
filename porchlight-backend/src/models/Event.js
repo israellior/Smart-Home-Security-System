@@ -36,6 +36,41 @@ export const KINDS = KIND_BY_RANK;
 export const ALERT_KINDS = ['motion', 'ring'];
 export const ALERT_RANKS = ALERT_KINDS.map((kind) => RANK_BY_KIND[kind]);
 
+/**
+ * How long Activity keeps something nobody saved: the row, its clip in the
+ * bucket, and the Clip that points at it. services/events/retention.js does
+ * the deleting; listEvents stops showing a row the moment it is due, so
+ * nothing is visible in the hour before the sweep gets to it.
+ *
+ * Counted from `receivedAt`, not `at`, so everyone gets the full week to
+ * see a thing: an alert a doorbell held through a long outage arrives with
+ * an old `at`, and counting from that would delete it on arrival.
+ */
+export const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * When retention began. Everything that arrived before it counts its week
+ * from here instead, so the deploy that introduced deleting did not delete
+ * a backlog nobody had yet been able to save - saving arrived in the same
+ * deploy, and rows past the week would have vanished before anyone could.
+ *
+ * Inert from RETENTION_STARTS + RETENTION_MS onward (2026-10-22): by then
+ * every row's own week is the later one. It can be deleted after that,
+ * along with its uses in expiryFor() below and retentionCutoff().
+ */
+export const RETENTION_STARTS = new Date('2026-10-15T12:00:00Z');
+
+/** When a row received at `receivedAt` is due, saved or not. */
+export function expiryFor(receivedAt) {
+  const from = Math.max(receivedAt.getTime(), RETENTION_STARTS.getTime());
+  return new Date(from + RETENTION_MS);
+}
+
+const savedBySchema = new mongoose.Schema(
+  { id: { type: String, required: true }, name: { type: String, default: null } },
+  { _id: false }
+);
+
 const eventSchema = new mongoose.Schema(
   {
     device: { type: mongoose.Schema.Types.ObjectId, ref: 'Device', required: true, index: true },
@@ -67,7 +102,15 @@ const eventSchema = new mongoose.Schema(
     // Optional free-form details - e.g. { pixelsChanged: 2240 } from the
     // motion detector's frame-diff output. A live recording carries
     // { recordedBy: { id, name } } here, written by the server.
-    meta: { type: mongoose.Schema.Types.Mixed, default: {} }
+    meta: { type: mongoose.Schema.Types.Mixed, default: {} },
+
+    // Kept past RETENTION_MS. Shared rather than per person, because the
+    // clip is: one object in the bucket for the whole household, so "keep
+    // it" is a decision about that object. `savedBy` is a snapshot of the
+    // name, like a recording's recordedBy, so the row still says who after
+    // they leave the doorbell.
+    savedAt: { type: Date, default: null },
+    savedBy: { type: savedBySchema, default: null }
   },
   { timestamps: true }
 );
@@ -81,6 +124,16 @@ const eventSchema = new mongoose.Schema(
  */
 eventSchema.virtual('type').get(function () {
   return KIND_BY_RANK[this.kindRank];
+});
+
+/**
+ * When this row will be deleted, or null if it is saved. Derived here so
+ * the app is told rather than keeping its own copy of RETENTION_MS - and so
+ * every push of an event carries it too, since they all go through toJSON.
+ */
+eventSchema.virtual('expiresAt').get(function () {
+  if (this.savedAt || !this.receivedAt) return null;
+  return expiryFor(this.receivedAt);
 });
 
 // Dedupe, and the reason retries are safe. The device resends the same
@@ -103,6 +156,11 @@ eventSchema.index({ device: 1, at: -1 });
 // and the alternative is a collection scan per device on every load of
 // the device list.
 eventSchema.index({ device: 1, receivedAt: 1 });
+
+// The retention sweep: "unsaved, and older than the week", across every
+// doorbell at once. Equality on savedAt (null matches unset) then a range on
+// receivedAt, so the sweep reads only the rows it is about to delete.
+eventSchema.index({ savedAt: 1, receivedAt: 1 });
 
 // Virtuals have to be asked for explicitly, and `id` is one Mongoose adds
 // by default - turned off so the payload gains `type` and nothing else.

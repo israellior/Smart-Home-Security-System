@@ -82,7 +82,28 @@ export const api = {
   removeMember: (token, id, userId) =>
     request(`/devices/${id}/members/${userId}`, { method: 'DELETE', token }),
 
-  listEvents: (token, deviceId) => request(`/devices/${deviceId}/events`, { token }),
+  // `filter` is one of ring, motion, live, saved - or nothing, for all.
+  // `before` is the nextCursor of the page already shown.
+  listEvents: (token, deviceId, { filter, before } = {}) => {
+    const query = new URLSearchParams();
+    if (filter && filter !== 'all') query.set('filter', filter);
+    if (before) query.set('before', before);
+    const qs = query.toString();
+    return request(`/devices/${deviceId}/events${qs ? `?${qs}` : ''}`, { token });
+  },
+
+  // Kept past the week for everyone on the doorbell, or not. Both answer
+  // with the event as it now stands.
+  saveEvent: (token, deviceId, eventId) =>
+    request(`/devices/${deviceId}/events/${encodeURIComponent(eventId)}/saved`, {
+      method: 'PUT',
+      token
+    }),
+  unsaveEvent: (token, deviceId, eventId) =>
+    request(`/devices/${deviceId}/events/${encodeURIComponent(eventId)}/saved`, {
+      method: 'DELETE',
+      token
+    }),
 
   // Fetched when someone presses play, not with the list. Playback URLs
   // are short-lived by design, so ones handed out with a list loaded ten

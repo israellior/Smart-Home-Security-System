@@ -1,3 +1,67 @@
+/*
+ * What to show: a row of pills under the tabs. Scrolls sideways rather
+ * than wrapping, so the list below starts at the same height whichever is
+ * chosen. The negative margin and matching padding - the page's own side
+ * padding, from App.module.css - let the row run to the screen's edge
+ * while its first pill lines up with everything else.
+ */
+.filters {
+  display: flex;
+  gap: 6px;
+  margin: 14px -24px 0;
+  padding: 2px 24px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* Fades the last pill into the edge on a screen too narrow for all
+     five, which is what says "there is more this way". Over the padding
+     only, so on a screen where they fit it fades nothing. */
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+}
+
+@media (max-width: 380px) {
+  .filters {
+    margin-left: -18px;
+    margin-right: -18px;
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+}
+
+.filters::-webkit-scrollbar {
+  display: none;
+}
+
+.filter {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 11px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.filter:hover {
+  color: var(--ink);
+}
+
+.filterOn {
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--brass) 60%, transparent);
+  background: color-mix(in srgb, var(--brass) 14%, transparent);
+}
+
+.filterOn svg {
+  color: var(--brass);
+}
+
 .sectionLabel {
   /* Carries a NewBadge or the "Preview" tag, so it lays them out on its
      own baseline the same way the tabs and the crumb do. */
@@ -103,6 +167,66 @@
 
 .rowButton:disabled {
   cursor: progress;
+}
+
+/* The row and its bookmark, side by side. The row keeps its pull to the
+   left for the hover wash; on the right the bookmark is its own target. */
+.rowLine {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.rowLine > .eventRow {
+  flex: 1;
+  min-width: 0;
+}
+
+.rowLine > .rowButton {
+  width: auto;
+  margin-right: 0;
+}
+
+/*
+ * Save: quiet until it is on. Outline and muted on every row, so a list of
+ * them reads as an option rather than as noise; filled brass once saved,
+ * the one row-level mark that means "this one stays".
+ */
+.saveBtn {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0.7;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 160ms ease, opacity 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.saveBtn:hover:not(:disabled) {
+  opacity: 1;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+
+.saveBtn:active:not(:disabled) {
+  transform: scale(0.9);
+}
+
+.saveBtn:disabled {
+  cursor: progress;
+}
+
+.saveBtnOn,
+.saveBtnOn:hover:not(:disabled) {
+  opacity: 1;
+  color: var(--brass);
 }
 
 .eventRow.preview {
@@ -287,6 +411,51 @@
   color: var(--brass);
 }
 
+/* The last day before a clip goes. Ember, because it is the one thing in
+   the line that asks for something - save it, or let it go. */
+.metaExpiring {
+  color: var(--ember);
+}
+
+.moreBtn {
+  display: block;
+  margin: 16px auto 0;
+  padding: 8px 18px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.moreBtn:hover:not(:disabled) {
+  border-color: var(--brass);
+  color: var(--brass);
+}
+
+.moreBtn:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.retention {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 28px 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.retention svg {
+  flex: none;
+  opacity: 0.7;
+}
+
 /* Quieter than previewTag - it annotates a real event rather than
    labelling the whole section as fake. */
 .delayedTag {
@@ -390,7 +559,8 @@
   }
 
   .rowButton:hover:not(:disabled) .playDisc,
-  .rowButton:active:not(:disabled) .playDisc {
+  .rowButton:active:not(:disabled) .playDisc,
+  .saveBtn:active:not(:disabled) {
     transform: none;
   }
 }

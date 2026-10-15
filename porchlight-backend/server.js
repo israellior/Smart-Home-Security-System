@@ -5,6 +5,7 @@ import { createApp } from './src/app.js';
 import { connectDB, ensureIndexes } from './src/config/db.js';
 import { attachSignaling, resetPresence } from './src/signaling/index.js';
 import { checkClockSkew } from './src/config/media.js';
+import { startRetentionSweep } from './src/services/events/retention.js';
 
 const PORT = process.env.PORT || 4000;
 
@@ -46,6 +47,10 @@ async function main() {
   // anything but a clock - but finding that out must not delay the API
   // from taking alerts.
   checkClockSkew();
+
+  // Activity keeps a week of what nobody saved. Hourly, and first a couple
+  // of minutes after start so a deploy brings the doorbells back first.
+  startRetentionSweep();
 }
 
 // Under Docker's default 10s stop timeout, after which it sends SIGKILL

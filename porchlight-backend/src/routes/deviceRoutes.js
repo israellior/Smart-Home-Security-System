@@ -14,7 +14,12 @@ import {
   listMembers,
   removeMember
 } from '../controllers/deviceController.js';
-import { listEvents, createEvent } from '../controllers/eventController.js';
+import {
+  listEvents,
+  createEvent,
+  saveEvent,
+  unsaveEvent
+} from '../controllers/eventController.js';
 import { getClipUrl } from '../controllers/clipController.js';
 import {
   createRecording,
@@ -74,6 +79,11 @@ deviceRoutes.delete('/:id/members/:userId', requireDeviceAccess, removeMember);
 
 deviceRoutes.get('/:deviceId/events', requireDeviceAccess, listEvents);
 deviceRoutes.post('/:deviceId/events', requireDeviceAccess, createEvent);
+
+// Kept past the week, for everyone on the doorbell. Any member may save or
+// unsave - a clip is the household's, not the saver's.
+deviceRoutes.put('/:deviceId/events/:eventId/saved', requireDeviceAccess, saveEvent);
+deviceRoutes.delete('/:deviceId/events/:eventId/saved', requireDeviceAccess, unsaveEvent);
 
 // Playback. Hands back a short-lived signed URL rather than the file, so
 // the browser fetches from the bucket and this server stays out of the
