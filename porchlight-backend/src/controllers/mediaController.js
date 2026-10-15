@@ -1,4 +1,10 @@
-import { mediaConfigured, mintMediaToken, publisherIdentity } from '../config/media.js';
+import {
+  mediaConfigured,
+  mintMediaToken,
+  publisherIdentity,
+  isViewerIdentityOf
+} from '../config/media.js';
+import { User } from '../models/User.js';
 import { takeFloor, releaseFloor, whoIsTalking } from '../services/media/talkFloor.js';
 import { requestViewer, noteWatchIntent } from '../signaling/index.js';
 import { isDeviceOnline } from '../signaling/registry.js';
@@ -69,7 +75,16 @@ export async function getViewerToken(req, res) {
   }
 
   const deviceKey = String(device._id);
-  const grant = await mintMediaToken('viewer', { deviceId: device.deviceId, userId: req.userId });
+  // The name rides in the token so everyone else on the call can see who
+  // is watching without asking us: LiveKit hands it to every participant
+  // with the join. A snapshot, which is fine for something that lives two
+  // minutes and names a person to people who know them.
+  const me = await User.findById(req.userId, { name: 1 }).lean();
+  const grant = await mintMediaToken('viewer', {
+    deviceId: device.deviceId,
+    userId: req.userId,
+    name: me?.name || 'Someone'
+  });
 
   // Nudge the doorbell: stop recording, bring up the call. Done here
   // rather than relying on the browser's own socket, because asking for
@@ -131,9 +146,17 @@ export async function takeTalk(req, res) {
     return res.status(409).json({ error: 'No hardware is provisioned for this doorbell yet' });
   }
 
+  // Which of this person's sessions is pressing the button - see
+  // isViewerIdentityOf. A browser from before identities were per session
+  // sends none, and the honest fix for that is a reload.
+  const identity = req.body?.identity;
+  if (!isViewerIdentityOf(identity, req.userId)) {
+    return res.status(400).json({ error: 'Leave the live view and open it again to talk' });
+  }
+
   let result;
   try {
-    result = await takeFloor(String(device._id), device.deviceId, req.userId);
+    result = await takeFloor(String(device._id), device.deviceId, req.userId, identity);
   } catch (err) {
     // Caught here rather than left to the central handler, which reports
     // every error as the same generic 500. The browser is about to try
@@ -153,6 +176,7 @@ export async function releaseTalk(req, res) {
   const deviceKey = String(req.device._id);
   // Only the holder can release, so a stale release from someone who was
   // already cut off cannot silence whoever took the floor from them.
-  const released = await releaseFloor(deviceKey, req.userId);
+  const identity = isViewerIdentityOf(req.body?.identity, req.userId) ? req.body.identity : null;
+  const released = await releaseFloor(deviceKey, req.userId, identity);
   return res.json({ released, talkingUserId: whoIsTalking(deviceKey) });
 }

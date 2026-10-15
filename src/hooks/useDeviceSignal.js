@@ -25,6 +25,11 @@ export function useDeviceSignal(token, deviceId) {
   // Who is recording the live view, `{ userId, name }` or null. Pushed on
   // every change, so only one person is ever offered the Rec button.
   const [recorder, setRecorder] = useState(null);
+  // Whose voice is coming out of the doorbell - a user id, or null.
+  const [talker, setTalker] = useState(null);
+  // The doorbell's Wi-Fi signal in dBm, as it last reported it. Null when
+  // it has not said, is not on Wi-Fi, or is not connected at all.
+  const [rssi, setRssi] = useState(null);
 
   useEffect(() => {
     if (!token || !deviceId) return undefined;
@@ -37,6 +42,8 @@ export function useDeviceSignal(token, deviceId) {
     setLastEvent(null);
     setLastClip(null);
     setRecorder(null);
+    setTalker(null);
+    setRssi(null);
 
     let socket = null;
     let retryTimer = null;
@@ -67,9 +74,20 @@ export function useDeviceSignal(token, deviceId) {
             attempt = 0;
             setConnected(Boolean(frame.connected));
             setRecorder(frame.recorder ?? null);
+            setTalker(frame.talker ?? null);
+            setRssi(frame.rssi ?? null);
             break;
           case 'presence':
             setConnected(Boolean(frame.connected));
+            // The signal belonged to the connection that just went. A
+            // doorbell coming back reports it again within moments.
+            if (!frame.connected) setRssi(null);
+            break;
+          case 'link':
+            setRssi(frame.rssi ?? null);
+            break;
+          case 'talk-floor':
+            setTalker(frame.userId ?? null);
             break;
           case 'event':
             setLastEvent(frame.event);
@@ -87,6 +105,7 @@ export function useDeviceSignal(token, deviceId) {
 
       socket.onclose = (closeEvent) => {
         setConnected(null);
+        setRssi(null);
         if (abandoned) return;
 
         // A rejected credential is a permanent answer - the same rule the
@@ -115,5 +134,5 @@ export function useDeviceSignal(token, deviceId) {
     };
   }, [token, deviceId]);
 
-  return { connected, lastEvent, lastClip, recorder };
+  return { connected, lastEvent, lastClip, recorder, talker, rssi };
 }

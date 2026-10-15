@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
 
 /**
@@ -72,15 +73,22 @@ const GRANTS = {
   // on the live session by setCanTalk() below, never by a token - so a
   // viewer token showing canPublish:false is the system working, not a
   // missing grant.
+  //
+  // One identity per *session*, not per person. LiveKit allows one
+  // participant per identity in a room and disconnects the older one, so
+  // `user:<id>` alone meant the same account watching on a phone and a
+  // laptop knocked each other out of the call. The person stays the
+  // prefix, which is all the device's is_viewer() and the app's list of
+  // who is watching read.
   viewer: {
-    identity: (deviceId, userId) => `user:${userId}`,
+    identity: (deviceId, userId) => `user:${userId}:${randomBytes(4).toString('hex')}`,
     grant: { canPublish: false, canSubscribe: true, canPublishData: false }
   },
   // Nothing mints this. Kept as the statement of what holding the floor
   // means - setCanTalk() sets exactly these publish rights on a live
   // participant, and the two must not drift apart.
   talker: {
-    identity: (deviceId, userId) => `user:${userId}`,
+    identity: (deviceId, userId) => `user:${userId}:<session>`,
     grant: {
       canPublish: true,
       canPublishSources: [TrackSource.MICROPHONE],
@@ -108,6 +116,22 @@ export const MEDIA_TOKEN_KINDS = Object.keys(GRANTS);
  */
 export function publisherIdentity(deviceId) {
   return GRANTS.publisher.identity(deviceId);
+}
+
+/**
+ * Whether a LiveKit identity is one of this person's viewer sessions.
+ *
+ * The browser names its own session when it asks for the microphone,
+ * because the floor is granted to a participant and only the browser
+ * knows which of a person's sessions is pressing the button. This is
+ * what stops it naming somebody else's.
+ */
+export function isViewerIdentityOf(identity, userId) {
+  return (
+    typeof identity === 'string' &&
+    identity.length <= 64 &&
+    identity.startsWith(`user:${userId}:`)
+  );
 }
 
 /**
@@ -207,7 +231,7 @@ const roomService = mediaConfigured
   ? new RoomServiceClient(LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
   : null;
 
-export async function setCanTalk(deviceId, userId, canTalk) {
+export async function setCanTalk(deviceId, identity, canTalk) {
   if (!roomService) throw new Error('Live media is not configured');
 
   const permission = {
@@ -218,7 +242,7 @@ export async function setCanTalk(deviceId, userId, canTalk) {
   };
 
   try {
-    await roomService.updateParticipant(roomName(deviceId), `user:${userId}`, undefined, permission);
+    await roomService.updateParticipant(roomName(deviceId), identity, undefined, permission);
     return true;
   } catch (err) {
     // The two directions fail differently, and treating them the same
@@ -230,7 +254,7 @@ export async function setCanTalk(deviceId, userId, canTalk) {
     // then is a no-op. Swallowing it is what keeps releasing a floor
     // from ever failing in a way that wedges it.
     if (!canTalk) {
-      console.warn(`Could not revoke talk permission for user:${userId} on ${deviceId}: ${err.message}`);
+      console.warn(`Could not revoke talk permission for ${identity} on ${deviceId}: ${err.message}`);
       return false;
     }
 

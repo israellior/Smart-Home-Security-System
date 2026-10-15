@@ -70,6 +70,36 @@ function micErrorMessage(err) {
   }
 }
 
+/**
+ * The person behind a viewer's identity, or null for anything else.
+ *
+ * Viewers join as `user:<id>:<session>` - one identity per session, so the
+ * same person on two screens is two participants - and the doorbell joins
+ * as `device:...`, twice. Who is watching is the people, so it keys on the
+ * middle part and never on the participant.
+ */
+function viewerUserId(identity) {
+  if (!identity?.startsWith('user:')) return null;
+  return identity.split(':')[1] || null;
+}
+
+/** Everyone watching, once each, `{ userId, name, isMe }`, you first. */
+function readViewers(room) {
+  const people = new Map();
+  const add = (participant, isMe) => {
+    const userId = viewerUserId(participant.identity);
+    if (!userId) return;
+    people.set(userId, {
+      userId,
+      name: participant.name || 'Someone',
+      isMe: isMe || people.get(userId)?.isMe || false
+    });
+  };
+  add(room.localParticipant, true);
+  for (const participant of room.remoteParticipants.values()) add(participant, false);
+  return [...people.values()].sort((a, b) => b.isMe - a.isMe || a.name.localeCompare(b.name));
+}
+
 export function useLiveView(token, deviceId) {
   const [phase, setPhase] = useState(IDLE);
   const [error, setError] = useState(null);
@@ -96,6 +126,9 @@ export function useLiveView(token, deviceId) {
   // Our own link dropped and LiveKit is bringing it back. The last frame
   // stays up, so this is said over it rather than instead of it.
   const [reconnecting, setReconnecting] = useState(false);
+  // Who else is on the call. Read from the room rather than asked of the
+  // server: every participant arrives with the name its token carried.
+  const [viewers, setViewers] = useState([]);
 
   const roomRef = useRef(null);
   const videoRef = useRef(null);
@@ -122,6 +155,7 @@ export function useLiveView(token, deviceId) {
     setUnanswered(false);
     setDoorbellJoined(false);
     setReconnecting(false);
+    setViewers([]);
   }, []);
 
   // Leaving the page must close the connection. Without this the room
@@ -198,9 +232,11 @@ export function useLiveView(token, deviceId) {
 
     room.on(RoomEvent.ParticipantConnected, (participant) => {
       if (participant.identity === publisher) answered();
+      setViewers(readViewers(room));
     });
 
     room.on(RoomEvent.ParticipantDisconnected, (participant) => {
+      setViewers(readViewers(room));
       if (participant.identity !== publisher) return;
       setDoorbellJoined(false);
       waitForAnswer();
@@ -240,6 +276,7 @@ export function useLiveView(token, deviceId) {
     // side, it almost always is.
     room.on(RoomEvent.Reconnected, () => {
       setReconnecting(false);
+      setViewers(readViewers(room));
       const stillThere = [...room.remoteParticipants.values()].some(
         (p) => p.identity === publisher
       );
@@ -256,11 +293,13 @@ export function useLiveView(token, deviceId) {
       setUnanswered(false);
       setDoorbellJoined(false);
       setReconnecting(false);
+      setViewers([]);
     });
 
     try {
       await room.connect(grant.url, grant.token);
       setPhase(LIVE);
+      setViewers(readViewers(room));
 
       // The doorbell may already be in the room - somebody else is
       // watching, or this viewer is joining a call in progress - in which
@@ -295,7 +334,8 @@ export function useLiveView(token, deviceId) {
     // Give the floor back before leaving. The server would time it out
     // anyway, but a minute of nobody being able to talk because someone
     // closed a tab is a minute too long.
-    if (talking) await api.releaseTalk(token, deviceId).catch(() => {});
+    const identity = roomRef.current?.localParticipant.identity;
+    if (talking) await api.releaseTalk(token, deviceId, identity).catch(() => {});
     detach();
   }, [talking, token, deviceId, detach]);
 
@@ -341,7 +381,8 @@ export function useLiveView(token, deviceId) {
     const mic = navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
     });
-    const floor = api.takeTalk(token, deviceId);
+    const identity = room.localParticipant.identity;
+    const floor = api.takeTalk(token, deviceId, identity);
     const [micResult, floorResult] = await Promise.allSettled([mic, floor]);
     const track = micResult.value?.getAudioTracks()[0];
 
@@ -351,7 +392,9 @@ export function useLiveView(token, deviceId) {
     // out, and a stray microphone is a microphone left open.
     const giveUp = () => {
       track?.stop();
-      if (floorResult.status === 'fulfilled') api.releaseTalk(token, deviceId).catch(() => {});
+      if (floorResult.status === 'fulfilled') {
+        api.releaseTalk(token, deviceId, identity).catch(() => {});
+      }
       setMic(null);
     };
 
@@ -387,6 +430,7 @@ export function useLiveView(token, deviceId) {
   const stopTalking = useCallback(async () => {
     held.current = false;
     const room = roomRef.current;
+    const identity = room?.localParticipant.identity;
     const track = micTrack.current;
     micTrack.current = null;
     // Unpublished and stopped rather than muted: a muted track still holds
@@ -397,7 +441,7 @@ export function useLiveView(token, deviceId) {
       track.stop();
     }
     setMic(null);
-    await api.releaseTalk(token, deviceId).catch(() => {});
+    await api.releaseTalk(token, deviceId, identity).catch(() => {});
   }, [token, deviceId]);
 
   // Our microphone joins the mix only while it is open - it is stopped
@@ -416,6 +460,7 @@ export function useLiveView(token, deviceId) {
     unanswered,
     doorbellJoined,
     reconnecting,
+    viewers,
     talking,
     // What useLiveRecording records. Plain MediaStreamTracks, owned by the
     // call: a recording reads them and never stops them.

@@ -117,6 +117,11 @@ export const api = {
       token
     }),
 
-  takeTalk: (token, deviceId) => request(`/devices/${deviceId}/talk`, { method: 'POST', token }),
-  releaseTalk: (token, deviceId) => request(`/devices/${deviceId}/talk`, { method: 'DELETE', token })
+  // `identity` is this tab's participant in the call. The floor goes to a
+  // session rather than a person, because the same person can be watching
+  // on two screens and only the one being pressed should open a microphone.
+  takeTalk: (token, deviceId, identity) =>
+    request(`/devices/${deviceId}/talk`, { method: 'POST', body: { identity }, token }),
+  releaseTalk: (token, deviceId, identity) =>
+    request(`/devices/${deviceId}/talk`, { method: 'DELETE', body: { identity }, token })
 };

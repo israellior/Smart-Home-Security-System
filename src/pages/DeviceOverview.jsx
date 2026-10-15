@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useDevice } from '../components/DeviceLayout';
+import { useDevice, useDeviceLive } from '../components/DeviceLayout';
+import { WifiIcon } from '../components/Icons';
 import { useDevices } from '../context/DevicesContext';
 import { GlowIcon } from '../components/GlowIcon';
 import {
@@ -9,6 +10,7 @@ import {
   statusDetail,
   statusTone
 } from '../lib/deviceStatus';
+import { wifiSignal } from '../lib/wifiSignal';
 import styles from './DeviceOverview.module.css';
 
 /**
@@ -39,6 +41,10 @@ export function DeviceOverview() {
   // this page ever sees the device.
   const status = deviceStatus(device);
   const awaitingFirstContact = isAwaitingFirstContact(status);
+  // Reported by the doorbell over its own socket, so it exists only while
+  // that socket does - and is shown only then.
+  const { rssi } = useDeviceLive();
+  const signal = status === 'online' ? wifiSignal(rssi) : null;
 
   /*
    * The one screen in the app that polls, and only while a doorbell has
@@ -70,6 +76,7 @@ export function DeviceOverview() {
   // Stable, so the Escape-key listener in LiveView isn't torn down and
   // rebuilt on every render of this page.
   const ringRef = useRef(null);
+  const expand = useCallback(() => setExpanded(true), []);
   const collapse = useCallback(() => {
     setExpanded(false);
     // Put the keyboard back where it came from. The close button it was
@@ -108,12 +115,34 @@ export function DeviceOverview() {
         <p className={`${styles.deviceState} ${styles[statusTone(status)]}`}>
           {statusDetail(status)}
         </p>
+        {signal && (
+          <p
+            className={`${styles.wifi} ${signal.weak ? styles.wifiWeak : ''}`}
+            title={`${signal.rssi} dBm`}
+          >
+            <WifiIcon size={14} level={signal.level} />
+            Wi-Fi signal: {signal.label}
+          </p>
+        )}
+        {/* Said once, here, with the thing to do about it - the live view
+            only flags it, because by then somebody is at the door. */}
+        {signal?.weak && (
+          <p className={styles.wifiAdvice}>
+            Live video may stutter. Moving the router closer, or a Wi-Fi extender near the door,
+            will help.
+          </p>
+        )}
         {device.location && <p className={styles.deviceLocation}>{device.location}</p>}
 
         {device.provisioned ? (
           <>
             <Suspense fallback={<p className={styles.heroNote}>Loading live view…</p>}>
-              <LiveView device={device} expanded={expanded} onCollapse={collapse} />
+              <LiveView
+                device={device}
+                expanded={expanded}
+                onExpand={expand}
+                onCollapse={collapse}
+              />
             </Suspense>
             {/* Said here rather than only in the status line, because this
                 is the state a customer spends the whole of setup in and
