@@ -7,8 +7,16 @@
 {$API_DOMAIN} {
 	encode zstd gzip
 
+	# The API only ever answers with JSON, so a browser has no reason to
+	# render, frame or run anything from this origin. The CSP says exactly
+	# that: if a response were ever mistaken for a page, nothing in it
+	# could load or execute. The app's own headers live in public/_headers.
 	header {
 		Strict-Transport-Security "max-age=31536000"
+		Content-Security-Policy "default-src 'none'; frame-ancestors 'none'"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
 		-Server
 	}
 

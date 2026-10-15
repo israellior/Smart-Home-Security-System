@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useDevices } from '../context/DevicesContext';
 import { GlowIcon } from '../components/GlowIcon';
 import { NewBadge } from '../components/NewBadge';
+import { AccountSection } from '../components/AccountSection';
 import { deviceStatus, statusLabel, statusTone } from '../lib/deviceStatus';
 import styles from './Home.module.css';
 
@@ -116,6 +117,8 @@ export function Home() {
           Add a doorbell
         </Link>
       )}
+
+      <AccountSection />
     </section>
   );
 }

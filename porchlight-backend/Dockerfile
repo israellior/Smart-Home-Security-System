@@ -3,7 +3,14 @@
 # Built for linux/arm64 in CI (the server is a Graviton t4g), and builds
 # unchanged for amd64 on a laptop - there are no native modules here,
 # bcryptjs included, so nothing in node_modules is architecture-specific.
-FROM node:24-alpine
+#
+# Pinned by digest, not just tag: a tag is whatever was last pushed under
+# that name, so the same commit could build on a different base from one
+# day to the next. The digest is the multi-arch index, so it still
+# resolves to the right image on arm64 and amd64 alike. Dependabot
+# (.github/dependabot.yml) opens a PR when the tag moves, which is how
+# this still gets security fixes.
+FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1
 
 ENV NODE_ENV=production
 WORKDIR /app

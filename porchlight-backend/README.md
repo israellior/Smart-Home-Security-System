@@ -59,9 +59,10 @@ register/login.
 | Method | Path                          | Description                        |
 |--------|-------------------------------|-------------------------------------|
 | GET    | `/health`                     | Liveness check                      |
-| POST   | `/auth/register`              | `{ name, email, password }` → token |
-| POST   | `/auth/login`                 | `{ email, password }` → token       |
+| POST   | `/auth/register`              | `{ name, email, password }` → token. 10 per IP per hour |
+| POST   | `/auth/login`                 | `{ email, password }` → token. 10 failures per email / 30 per IP per 15 min, then 429 |
 | GET    | `/auth/me`             (auth) | Current user                        |
+| POST   | `/auth/sign-out-everywhere` (auth) | Bumps the user's `tokenVersion`: every token they hold, this one included, stops verifying; their open sockets close with 4002 |
 | GET    | `/devices`              (auth)| Devices you're a member of, each with your `role` |
 | POST   | `/devices`              (auth)| Create a device — you become its owner |
 | POST   | `/devices/join`         (auth)| `{ shareCode }` → join a device. **First joiner becomes its owner** |
@@ -85,7 +86,7 @@ register/login.
 | GET    | `/devices/:deviceId/self` (device) | What the Pi can see about itself. Device credential, not a JWT |
 | POST   | `/devices/:deviceId/media-token/publisher` (device) | Camera + mic up, cannot subscribe |
 | POST   | `/devices/:deviceId/media-token/listener` (device) | Subscribe only, publishes nothing |
-| POST   | `/clips/:eventId/upload-url` (device) | Empty body → a short-lived PUT grant |
+| POST   | `/clips/:eventId/upload-url` (device) | `{ bytes }` → a short-lived PUT grant for exactly that many bytes |
 | POST   | `/clips/:eventId/confirm`   (device) | `{ kind, at, durationMs, partial, bytes }` → 204 |
 
 Routes marked **(device)** authenticate with a *device credential*
@@ -282,7 +283,7 @@ Three steps, and the server is not in the middle of the one that carries
 bytes:
 
 ```
-1. POST /api/clips/<eventId>/upload-url   (device)  -> a short-lived PUT grant
+1. POST /api/clips/<eventId>/upload-url   (device)  -> a short-lived PUT grant, { bytes } in the body
 2. PUT  <that url>                                  -> straight to the bucket
 3. POST /api/clips/<eventId>/confirm      (device)  -> metadata, in the body
 ```
@@ -347,10 +348,15 @@ because of that:
 - `requestChecksumCalculation: 'WHEN_REQUIRED'` — since v3.729 the AWS SDK adds
   `x-amz-sdk-checksum-algorithm` to PutObject by default. If that lands in the
   signature, a client that doesn't send it fails **every** upload.
-- `signableHeaders: new Set(['host'])` — anything else signed becomes a header
-  the device is required to reproduce byte-for-byte, and we don't control what
-  it sends. `Content-Type` rides in the returned `headers` instead, which the
-  uploader copies verbatim.
+- `signableHeaders: new Set(['host', 'content-length', 'content-type'])` —
+  anything signed becomes a header the device is required to reproduce
+  byte-for-byte, so the set is exactly what urllib already sends. urllib
+  computes `Content-Length` from the body, and `Content-Type` comes from the
+  returned `headers`, which the uploader copies verbatim. Signing the length is
+  the size cap: step 1 takes the clip's size as `bytes` (at most 100MB), and the
+  bucket refuses a PUT of any other length. It was `['host']` alone until the
+  uploader sent its size; an unsized grant let one leaked credential store
+  objects of any size.
 
 From the server's side that failure is invisible: we generate a URL that looks
 perfectly good and the device sees a non-2xx it can only retry forever. Both

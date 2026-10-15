@@ -36,6 +36,7 @@ import {
 
 // A socket that connects and says nothing is either broken or probing.
 const HELLO_TIMEOUT_MS = 10_000;
+const MAX_FRAME_BYTES = 64 * 1024;
 
 // A doorbell that loses power does not close its socket - the TCP
 // connection simply stops answering, and without this the app would show
@@ -224,6 +225,20 @@ export function disconnectHardware(deviceKey, reason = 'Device removed') {
 }
 
 /**
+ * Closes every socket a person has open, for "sign out everywhere".
+ *
+ * 4002 because it is the truth - the token that socket was opened with no
+ * longer verifies - and because it is the code a browser does not
+ * reconnect on. Anything retryable would have it reconnect straight into
+ * a refusal.
+ */
+export function disconnectUser(userId, reason = 'Signed out') {
+  for (const socket of registry.browserSocketsOfUser(userId)) {
+    socket.close(CLOSE_UNAUTHORIZED, reason);
+  }
+}
+
+/**
  * A restart means nothing is connected, whatever the database last
  * recorded. Without this, every doorbell that was online when the process
  * died shows as connected forever - the sockets are gone and no close
@@ -243,7 +258,14 @@ export async function resetPresence() {
 }
 
 export function attachSignaling(server) {
-  const wss = new WebSocketServer({ server, path: '/signal' });
+  // maxPayload because the default is 100 MiB, and a socket may send
+  // before it has said who it is: without a cap, anyone on the internet
+  // could hand this process a 100 MiB frame to buffer and JSON.parse,
+  // repeatedly, inside the hello window. The largest real frame is a
+  // hello carrying a JWT, around a kilobyte - there is no SDP on this
+  // socket - so 64 KiB is generous. ws closes an oversized sender with
+  // 1009.
+  const wss = new WebSocketServer({ server, path: '/signal', maxPayload: MAX_FRAME_BYTES });
 
   wss.on('connection', (socket) => {
     socket.ctx = null;

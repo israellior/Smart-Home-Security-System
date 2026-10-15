@@ -41,13 +41,34 @@ function unavailable(res) {
   return res.status(503).json({ error: 'Clip storage is not configured on this server' });
 }
 
+// A doorbell clip is fifteen seconds by default, a few megabytes. This is
+// the browser recording's cap (recordingController), which is far above
+// any clip a doorbell makes and far below anything that would be a
+// problem to hold.
+const MAX_CLIP_BYTES = 100 * 1024 * 1024;
+
 /**
- * Step 1. Deliberately accepts an empty body and requires nothing of it.
+ * Step 1. The body carries one thing: `bytes`, the size of the file the
+ * device is about to PUT.
  *
- * The device comes from the credential and the event from the path, so
- * there is nothing left for a body to carry - and the uploader sends
- * literally `{}`. An eventId we have never seen is normal, not an error:
- * the clip may well arrive before its alert.
+ * The device comes from the credential and the event from the path; the
+ * size is what turns the grant from "upload anything" into "upload
+ * exactly this". It is signed into the URL, so the bucket refuses a PUT
+ * of any other length on signature alone - a presigned PUT has no other
+ * way to say "no larger than". Without it, one leaked device credential
+ * was a licence to store 5GB objects for as long as it stayed valid.
+ *
+ * MEANT TO BE REQUIRED, AND NOT YET. An optional cap is no cap - but on
+ * 2026-10-15 no doorbell's uploader sent `bytes` (upload-clip.py and
+ * upload_clip.cpp both posted an empty body), so requiring it would have
+ * stopped every clip arriving. Until the release that sends it is on
+ * the doorbells, a request without it gets the open-ended grant
+ * production already gave; a request *with* it is checked and capped.
+ * Once that release is out, make `bytes` required here and delete the
+ * unsized branch of signUpload.
+ *
+ * An eventId we have never seen is normal, not an error: the clip may
+ * well arrive before its alert.
  */
 export async function createUploadUrl(req, res) {
   if (!storageConfigured) return unavailable(res);
@@ -55,6 +76,14 @@ export async function createUploadUrl(req, res) {
   const { eventId } = req.params;
   if (badEventId(eventId)) {
     return res.status(400).json({ error: 'eventId must be a non-empty string' });
+  }
+
+  const { bytes } = req.body || {};
+  if (bytes !== undefined && (!Number.isInteger(bytes) || bytes <= 0)) {
+    return res.status(400).json({ error: '`bytes` must be a positive integer' });
+  }
+  if (bytes !== undefined && bytes > MAX_CLIP_BYTES) {
+    return res.status(400).json({ error: `A clip can be at most ${MAX_CLIP_BYTES} bytes` });
   }
 
   const { hardware } = req;
@@ -68,7 +97,7 @@ export async function createUploadUrl(req, res) {
     { upsert: true, new: true }
   );
 
-  const grant = await signUpload(hardware.deviceId, eventId);
+  const grant = await signUpload(hardware.deviceId, eventId, { bytes });
   return res.status(201).json({ ...grant, status: clip.status });
 }
 

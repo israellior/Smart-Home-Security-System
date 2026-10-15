@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import jwt from 'jsonwebtoken';
+import { verifyUserToken } from '../middleware/auth.js';
 import { Device } from '../models/Device.js';
 import { Membership } from '../models/Membership.js';
 import { parseDeviceCredential, secretMatchesHash } from '../utils/deviceCredential.js';
@@ -81,15 +81,15 @@ async function authenticateHardware(deviceId, token) {
  * a doorbell with no hardware paired does not have one.
  */
 async function authenticateBrowser(deviceId, token) {
-  let userId;
-  try {
-    userId = jwt.verify(token, process.env.JWT_SECRET).sub;
-  } catch (err) {
-    // Expiry included: an expired token is a permanent answer for this
-    // connection attempt. Reconnecting with a fresh one is the fix, and
-    // that is the client's job.
-    return { error: 'Invalid or expired token' };
-  }
+  // The same check requireAuth makes, tokenVersion included, so a token
+  // revoked by "sign out everywhere" cannot open a socket either.
+  //
+  // Expiry and revocation are permanent answers for this connection
+  // attempt. Reconnecting with a fresh token is the fix, and that is the
+  // client's job. A database error throws, which the caller treats as
+  // transient.
+  const userId = await verifyUserToken(token);
+  if (!userId) return { error: 'Invalid or expired token' };
 
   if (!mongoose.isValidObjectId(deviceId)) return { error: 'Device not found' };
 

@@ -1,0 +1,22 @@
+# Response headers for the app, applied by Cloudflare Workers static assets.
+# Vite copies public/ into dist/ as-is, so this lands at dist/_headers.
+#
+# The CSP lists every origin the app talks to, and nothing else:
+#   api.porchl.stream        the API (https) and the signaling socket (wss)
+#   *.livekit.cloud          live video - LiveKit Cloud signaling and region lookup
+#   *.r2.cloudflarestorage.com  clip playback (<video src>) and recording upload (PUT)
+#   fonts.googleapis.com / fonts.gstatic.com  the two typefaces in index.html
+#   blob:                    a finished recording, played back and downloaded locally
+# A new origin the app needs has to be added here, or the browser will block
+# it - look for "Content-Security-Policy" in the console.
+#
+# The point of it: the login token lives in localStorage, so any script that
+# runs on this origin can read it. script-src 'self' means only the bundle
+# we built can run - no inline scripts, nothing from anywhere else.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob: https://*.r2.cloudflarestorage.com; connect-src 'self' https://api.porchl.stream wss://api.porchl.stream https://*.livekit.cloud wss://*.livekit.cloud https://*.r2.cloudflarestorage.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests
+  Strict-Transport-Security: max-age=31536000
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(self), geolocation=(), payment=(), usb=()

@@ -26,7 +26,9 @@ services:
         tag: "api/{{.ID}}"
 
   caddy:
-    image: caddy:2.11-alpine
+    # Pinned by digest for the same reason as the API's base image (see
+    # porchlight-backend/Dockerfile); Dependabot bumps it.
+    image: caddy:2.11-alpine@sha256:881bbc60f9986d5ab8e7cfd6cf7e4ef3c9c0439fef2429d035d065577882f028
     env_file: proxy.env
     ports:
       - "80:80"
