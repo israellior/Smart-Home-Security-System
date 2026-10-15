@@ -19,7 +19,7 @@ import { disconnectHardware } from '../signaling/index.js';
 // back a whole device document doesn't get an error, it just can't
 // escalate anything. `connected` is absent on purpose: only real
 // hardware reporting in should ever flip it.
-const EDITABLE_FIELDS = ['name', 'location', 'sensitivity'];
+const EDITABLE_FIELDS = ['name', 'location', 'sensitivity', 'autoUpdate', 'timeZone'];
 
 // The same 40 the inputs in the app allow, so nobody using the app can
 // meet this limit - it is for requests that did not come from the app.
@@ -36,6 +36,20 @@ const SENSITIVITIES = ['low', 'standard', 'high'];
 function invalidField(field, value) {
   if (field === 'sensitivity') {
     return SENSITIVITIES.includes(value) ? null : 'Sensitivity must be low, standard or high';
+  }
+  if (field === 'autoUpdate') {
+    return typeof value === 'boolean' ? null : 'autoUpdate must be true or false';
+  }
+  if (field === 'timeZone') {
+    // An IANA name Intl knows, because the update schedule does its
+    // arithmetic with Intl - a name it cannot use would quietly mean UTC.
+    try {
+      if (typeof value !== 'string' || value.length > 64) throw new Error();
+      new Intl.DateTimeFormat('en-US', { timeZone: value });
+      return null;
+    } catch {
+      return 'Unknown time zone';
+    }
   }
   if (typeof value !== 'string') return `${field} must be text`;
   if (value.trim().length > MAX_TEXT) return `${field} must be at most ${MAX_TEXT} characters`;

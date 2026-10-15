@@ -92,6 +92,12 @@ export const api = {
     return request(`/devices/${deviceId}/events${qs ? `?${qs}` : ''}`, { token });
   },
 
+  // Software: the release the doorbells are being brought to, and asking
+  // one to install it now instead of tonight.
+  getLatestRelease: (token) => request('/releases/latest', { token }),
+  requestUpdate: (token, deviceId) =>
+    request(`/devices/${deviceId}/update`, { method: 'POST', token }),
+
   // Kept past the week for everyone on the doorbell, or not. Both answer
   // with the event as it now stands.
   saveEvent: (token, deviceId, eventId) =>

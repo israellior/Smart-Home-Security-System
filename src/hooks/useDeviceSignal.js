@@ -28,6 +28,10 @@ export function useDeviceSignal(token, deviceId) {
   // Who is recording the live view, `{ userId, name }` or null. Pushed on
   // every change, so only one person is ever offered the Rec button.
   const [recorder, setRecorder] = useState(null);
+  // The doorbell's software as the server last described it - version,
+  // the update in flight, automatic or not. Null until something changes;
+  // the device record carries the state as it was when the page loaded.
+  const [software, setSoftware] = useState(null);
   // Whose voice is coming out of the doorbell - a user id, or null.
   const [talker, setTalker] = useState(null);
   // The doorbell's Wi-Fi signal in dBm, as it last reported it. Null when
@@ -48,6 +52,7 @@ export function useDeviceSignal(token, deviceId) {
     setRecorder(null);
     setTalker(null);
     setRssi(null);
+    setSoftware(null);
 
     let socket = null;
     let retryTimer = null;
@@ -93,6 +98,11 @@ export function useDeviceSignal(token, deviceId) {
           case 'talk-floor':
             setTalker(frame.userId ?? null);
             break;
+          case 'software': {
+            const { type, ...rest } = frame;
+            setSoftware(rest);
+            break;
+          }
           case 'event':
             setLastEvent(frame.event);
             break;
@@ -141,5 +151,5 @@ export function useDeviceSignal(token, deviceId) {
     };
   }, [token, deviceId]);
 
-  return { connected, lastEvent, lastClip, lastSaved, recorder, talker, rssi };
+  return { connected, lastEvent, lastClip, lastSaved, recorder, talker, rssi, software };
 }

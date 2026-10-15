@@ -4,6 +4,42 @@ import mongoose from 'mongoose';
 // field here - it lives in the Membership collection, so a device can be
 // shared with more than one account (a household) and a single account
 // can hold more than one doorbell.
+const firmwareSchema = new mongoose.Schema(
+  {
+    version: { type: String, default: null },
+    updater: { type: Boolean, default: false },
+    reportedAt: { type: Date, default: null }
+  },
+  { _id: false }
+);
+
+export const UPDATE_STATES = [
+  'sent', // offered; the doorbell has not said anything yet
+  'downloading',
+  'installing',
+  'rebooting',
+  'trial', // back up on the new version, not yet past the rollback window
+  'done',
+  'failed', // never got as far as rebooting into it
+  'rolled-back' // booted it, it was not healthy, the doorbell went back
+];
+
+const updateSchema = new mongoose.Schema(
+  {
+    state: { type: String, enum: UPDATE_STATES, required: true },
+    version: { type: String, required: true },
+    fromVersion: { type: String, default: null },
+    error: { type: String, default: null },
+    // 0..1 while downloading, so the app can show how far along it is.
+    progress: { type: Number, default: null },
+    startedAt: { type: Date, required: true },
+    // When the state last changed - what a timeout is measured from.
+    changedAt: { type: Date, required: true },
+    finishedAt: { type: Date, default: null }
+  },
+  { _id: false }
+);
+
 const deviceSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true, default: 'Front Door' },
@@ -93,7 +129,32 @@ const deviceSchema = new mongoose.Schema(
     // rather than a second membership. Kept rather than just clearing the
     // hash, because "already claimed" and "never had a code" want
     // different answers, and support needs to know which happened.
-    claimedAt: { type: Date, default: null }
+    claimedAt: { type: Date, default: null },
+
+    // --- Software ------------------------------------------------------
+    // See services/updates/index.js for how these move.
+
+    // What the doorbell reported in its last hello: the RAUC bundle
+    // version that put its running system there (null for the system
+    // flashed at the factory), and whether it has the updater at all - a
+    // doorbell on a release from before updates ignores the update frame,
+    // so it is never sent one.
+    firmware: { type: firmwareSchema, default: null },
+
+    // Updates install themselves between 3 and 4 in the morning, the
+    // doorbell's local time, unless an owner turns this off. `timeZone` is
+    // an IANA name taken from the first member's browser that sees it unset.
+    autoUpdate: { type: Boolean, default: true },
+    timeZone: { type: String, default: null },
+
+    // The update in flight, or the last one to finish.
+    update: { type: updateSchema, default: null },
+
+    // A release that rolled back on this doorbell. Not offered again
+    // automatically - every night would be another five-minute outage and
+    // another rollback - until a newer one is published. Update now can
+    // still ask for it.
+    failedVersion: { type: String, default: null }
   },
   { timestamps: true }
 );

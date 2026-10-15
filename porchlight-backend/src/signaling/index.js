@@ -21,6 +21,7 @@ import {
   whoIsRecording,
   releaseRecordingIfHeld
 } from '../services/media/recordingFloor.js';
+import { onDeviceHello, handleUpdateStatus } from '../services/updates/index.js';
 import * as registry from './registry.js';
 import {
   ROLE_DEVICE,
@@ -491,7 +492,10 @@ async function handleHello(socket, frame) {
     device,
     deviceKey,
     userId: result.userId || null,
-    peerId: role === ROLE_BROWSER ? nextPeerId++ : null
+    peerId: role === ROLE_BROWSER ? nextPeerId++ : null,
+    // A bridge new enough to install updates says so in its hello. One
+    // that does not would ignore the update frame, so it is never sent one.
+    updater: role === ROLE_DEVICE && frame.updater === true
   };
 
   const displaced = registry.add(deviceKey, role, socket);
@@ -531,6 +535,11 @@ async function handleHello(socket, frame) {
     links.delete(deviceKey);
     await setConnected(device, true);
     broadcastPresence(deviceKey, true);
+    // What it is running, and so how its last update went. Not awaited
+    // into the hello: a slow write must not hold up the call below.
+    onDeviceHello(device, frame).catch((err) => {
+      console.error(`Could not record software for ${device.deviceId}:`, err.message);
+    });
     // Last, and after presence: a viewer's browser should have the
     // doorbell showing as connected before the call it asked for
     // arrives, not after.
@@ -556,6 +565,12 @@ async function routeFrame(socket, frame) {
       // The daemon's bridge, which is the process on the network.
       if (role !== ROLE_DEVICE) return;
       return handleLink(socket, frame);
+
+    case 'update-status':
+      if (role !== ROLE_DEVICE) return;
+      return handleUpdateStatus(socket.ctx.device, frame).catch((err) => {
+        console.error('Update status not recorded:', err.message);
+      });
 
     case 'ping':
       return void send(socket, { type: 'pong' });

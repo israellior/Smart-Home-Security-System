@@ -151,6 +151,19 @@ export function browserSocketsOfUser(userId) {
   return found;
 }
 
+/**
+ * Every doorbell connected right now whose bridge can take an update - the
+ * only ones the nightly schedule has anything to say to. From this process's
+ * own sockets, so it costs no query and is exact.
+ */
+export function updatableDeviceKeys() {
+  const keys = [];
+  for (const [deviceKey, r] of rooms) {
+    if (r[ROLE_DEVICE]?.ctx?.updater) keys.push(deviceKey);
+  }
+  return keys;
+}
+
 /** Is the *hardware* on the other end right now - not the media script. */
 export function isDeviceOnline(deviceKey) {
   return Boolean(rooms.get(deviceKey)?.[ROLE_DEVICE]);

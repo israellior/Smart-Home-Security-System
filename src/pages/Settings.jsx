@@ -4,6 +4,7 @@ import { useDevice } from '../components/DeviceLayout';
 import { Toggle } from '../components/Toggle';
 import { SegmentedControl } from '../components/SegmentedControl';
 import { DeviceSharing } from '../components/DeviceSharing';
+import { SoftwareSection } from '../components/SoftwareSection';
 import styles from './Settings.module.css';
 
 const SENSITIVITY_OPTIONS = [
@@ -130,12 +131,10 @@ export function Settings() {
 
       <DeviceSharing device={device} />
 
+      {device.provisioned && <SoftwareSection device={device} />}
+
       <p className={styles.sectionLabel}>About</p>
       <div className={styles.fieldGroup}>
-        <div className={styles.aboutRow}>
-          <span>Firmware</span>
-          <span>Not connected</span>
-        </div>
         <div className={styles.aboutRow}>
           <span>App version</span>
           <span>0.2 — pre-hardware</span>

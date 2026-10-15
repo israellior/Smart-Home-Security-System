@@ -20,7 +20,7 @@ import styles from './DeviceLayout.module.css';
 export function DeviceLayout() {
   const { deviceId } = useParams();
   const { token } = useAuth();
-  const { devices, loading, error, noteEvent, refresh } = useDevices();
+  const { devices, loading, error, noteEvent, refresh, updateDevice } = useDevices();
 
   // One socket per doorbell, opened here rather than in each page, so
   // switching between Overview and Activity doesn't tear a connection
@@ -46,6 +46,18 @@ export function DeviceLayout() {
   useEffect(() => {
     if (signal.lastEvent) noteEvent(signal.lastEvent);
   }, [signal.lastEvent, noteEvent]);
+
+  // Updates install at 3am the doorbell's time, and the doorbell has no
+  // idea what that is - so the first member to open it with the zone unset
+  // lends theirs. Once, never overwritten: a member travelling should not
+  // move their household's update into the afternoon.
+  const current = devices.find((d) => d._id === deviceId);
+  const missingZone = Boolean(current) && !current.timeZone;
+  useEffect(() => {
+    if (!missingZone) return;
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (timeZone) updateDevice(deviceId, { timeZone });
+  }, [missingZone, deviceId, updateDevice]);
 
   if (loading) return <p className={styles.notice}>Loading…</p>;
   if (error) return <p className={styles.error}>{error}</p>;
