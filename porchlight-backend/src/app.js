@@ -11,6 +11,7 @@ import { authRoutes } from './routes/authRoutes.js';
 import { deviceRoutes } from './routes/deviceRoutes.js';
 import { hardwareRoutes } from './routes/hardwareRoutes.js';
 import { clipRoutes } from './routes/clipRoutes.js';
+import { releaseRoutes } from './routes/releaseRoutes.js';
 
 export function createApp() {
   const app = express();
@@ -40,6 +41,7 @@ export function createApp() {
   // because devices are provisioned offline rather than over the wire.
   app.use('/api/devices', hardwareRoutes);
   app.use('/api/clips', clipRoutes);
+  app.use('/api/releases', releaseRoutes);
   app.use('/api/devices', deviceRoutes);
 
   app.use((req, res) => {

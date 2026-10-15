@@ -28,6 +28,7 @@ import {
   releaseRecordingTurn
 } from '../controllers/recordingController.js';
 import { getViewerToken, takeTalk, releaseTalk } from '../controllers/mediaController.js';
+import { requestUpdate } from '../controllers/updateController.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireDeviceAccess, requireDeviceOwner } from '../middleware/deviceAccess.js';
 
@@ -108,3 +109,6 @@ deviceRoutes.post('/:deviceId/recordings/:eventId/confirm', requireDeviceAccess,
 deviceRoutes.post('/:deviceId/live', requireDeviceAccess, getViewerToken);
 deviceRoutes.post('/:deviceId/talk', requireDeviceAccess, takeTalk);
 deviceRoutes.delete('/:deviceId/talk', requireDeviceAccess, releaseTalk);
+
+// Install the latest release now rather than tonight.
+deviceRoutes.post('/:deviceId/update', requireDeviceAccess, requestUpdate);

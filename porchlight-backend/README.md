@@ -85,6 +85,10 @@ register/login.
 | POST   | `/devices/:deviceId/live`   (auth) | Viewer token + nudges the doorbell to join |
 | POST   | `/devices/:deviceId/talk`   (auth) | Take the microphone (last press wins) |
 | DELETE | `/devices/:deviceId/talk`   (auth) | Give it back — holder only |
+| POST   | `/devices/:deviceId/update` (auth) | Install the latest release now instead of tonight → 202 |
+| GET    | `/releases/latest`          (auth) | The release doorbells are being brought to: `{ version, notes, publishedAt }` |
+| POST   | `/releases`         (release token) | `{ version, notes, bytes, sha256 }` → a PUT grant for the bundle |
+| POST   | `/releases/:version/publish` (release token) | Bundle uploaded and the right size → offered to every doorbell |
 | GET    | `/devices/:deviceId/self` (device) | What the Pi can see about itself. Device credential, not a JWT |
 | POST   | `/devices/:deviceId/media-token/publisher` (device) | Camera + mic up, cannot subscribe |
 | POST   | `/devices/:deviceId/media-token/listener` (device) | Subscribe only, publishes nothing |
@@ -444,6 +448,37 @@ is due, so nothing lingers on screen for the hour before the sweep.
 Every event in the API carries `expiresAt` (null when saved), and the list
 carries `retentionMs`, so the app shows "Deleted tomorrow" and asks before an
 unsave that would delete something without keeping its own copy of the number.
+
+## Software updates
+
+The doorbell does the dangerous part itself and has shown it can: RAUC writes
+the slot it is not running, U-Boot boots it on trial, and `porchlight-health`
+falls back if porchlightd is not steady within five minutes. This server
+decides when to ask and reads the outcome (`services/updates/index.js`).
+
+- **Releases** are signed RAUC bundles under `releases/<version>.raucb` in the
+  clip bucket, published from the build machine by the device repo's
+  `image/buildroot/publish-release.sh`. Publishing needs `RELEASE_TOKEN`
+  (Parameter Store, `infra/scripts/put-secret.sh RELEASE_TOKEN`); without it
+  the publish endpoints answer 503. The token cannot make a doorbell install
+  anything: RAUC refuses a bundle the build machine's key did not sign.
+- **The newest published release is the target.** Publishing an older version
+  again is how a fleet is rolled back.
+- **When:** every doorbell with `autoUpdate` on (the default) is offered it in
+  its 3am hour, by `timeZone` - set from the first member's browser that sees
+  it unset. A tick every five minutes, only over doorbells connected to this
+  process (`registry.updatableDeviceKeys()`). Update now asks at once.
+- **Only doorbells that say they can.** The hello carries `version` (RAUC's
+  record of the booted slot) and `updater`; a bridge from before updates
+  sends neither and is never sent the frame. Such a doorbell needs one manual
+  update to a release with the updater.
+- **The outcome comes from the next hello.** Back on the new version is
+  `trial`, and `done` ten minutes later; back on the old one after
+  `rebooting`, or during the trial, is `rolled-back`, recorded in
+  `failedVersion` and never offered automatically again. An update silent for
+  45 minutes is `failed`, and retried the next night.
+- Progress is pushed to the app as `software` frames; the device contract is
+  in the device repo's `docs/server-brief.md`.
 
 ### Playback
 

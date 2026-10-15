@@ -275,3 +275,50 @@ export async function deleteClipObjects(deviceId, eventIds) {
   }
   return failed;
 }
+
+// --- Releases --------------------------------------------------------------
+//
+// Software bundles for the doorbells live in the same bucket, under their own
+// prefix: one object per version, written once by the publish script and read
+// by every doorbell that updates to it. No lifecycle rule touches releases/.
+
+const BUNDLE_TYPE = 'application/octet-stream';
+
+// Long enough for a home connection to pull ~90 MB with room for a stall and
+// a retry. The URL is good for one object, GET only.
+const BUNDLE_URL_TTL_SECONDS = 2 * 60 * 60;
+
+export function releaseKey(version) {
+  return `releases/${encodeURIComponent(version)}.raucb`;
+}
+
+/** A grant for the publish script to upload exactly `bytes` of one bundle. */
+export async function signReleaseUpload(version, bytes) {
+  const url = await getSignedUrl(
+    requireClient(),
+    new PutObjectCommand({
+      Bucket: R2_BUCKET,
+      Key: releaseKey(version),
+      ContentType: BUNDLE_TYPE,
+      ContentLength: bytes
+    }),
+    {
+      expiresIn: UPLOAD_URL_TTL_SECONDS,
+      signableHeaders: new Set(['host', 'content-length', 'content-type'])
+    }
+  );
+  return { url, method: 'PUT', headers: { 'Content-Type': BUNDLE_TYPE } };
+}
+
+/** Where a doorbell downloads a bundle from. */
+export async function signReleaseDownload(version) {
+  return getSignedUrl(
+    requireClient(),
+    new GetObjectCommand({ Bucket: R2_BUCKET, Key: releaseKey(version) }),
+    { expiresIn: BUNDLE_URL_TTL_SECONDS }
+  );
+}
+
+export function releaseSize(version) {
+  return sizeOf(releaseKey(version));
+}

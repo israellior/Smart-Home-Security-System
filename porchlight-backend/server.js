@@ -6,6 +6,7 @@ import { connectDB, ensureIndexes } from './src/config/db.js';
 import { attachSignaling, resetPresence } from './src/signaling/index.js';
 import { checkClockSkew } from './src/config/media.js';
 import { startRetentionSweep } from './src/services/events/retention.js';
+import { startUpdateSchedule } from './src/services/updates/index.js';
 
 const PORT = process.env.PORT || 4000;
 
@@ -51,6 +52,10 @@ async function main() {
   // Activity keeps a week of what nobody saved. Hourly, and first a couple
   // of minutes after start so a deploy brings the doorbells back first.
   startRetentionSweep();
+
+  // Software updates: finishes trials, gives up on silent updates, and
+  // offers the latest release to doorbells in their 3am hour.
+  startUpdateSchedule();
 }
 
 // Under Docker's default 10s stop timeout, after which it sends SIGKILL
