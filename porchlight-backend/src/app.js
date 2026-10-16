@@ -12,6 +12,7 @@ import { deviceRoutes } from './routes/deviceRoutes.js';
 import { hardwareRoutes } from './routes/hardwareRoutes.js';
 import { clipRoutes } from './routes/clipRoutes.js';
 import { releaseRoutes } from './routes/releaseRoutes.js';
+import { pushRoutes } from './routes/pushRoutes.js';
 
 export function createApp() {
   const app = express();
@@ -29,6 +30,7 @@ export function createApp() {
   app.get('/api/health', (req, res) => res.json({ ok: true }));
 
   app.use('/api/auth', authRoutes);
+  app.use('/api/push', pushRoutes);
 
   // Hardware first. deviceRoutes applies requireAuth to everything it
   // holds, so anything reaching it must carry a *user* token - a Pi

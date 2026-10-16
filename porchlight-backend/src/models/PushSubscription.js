@@ -8,10 +8,10 @@ import mongoose from 'mongoose';
  *
  * The shape mirrors the browser's PushSubscription object exactly
  * (endpoint + p256dh/auth keys), because that's what the push service
- * requires to encrypt and route a message. Nothing sends these yet -
- * the model exists so the subscribe flow can be built and stored ahead
- * of the delivery code, and so channels/webPush.js has something real
- * to read once VAPID keys are configured.
+ * requires to encrypt and route a message. Written by the app through
+ * PUT /api/push/subscriptions, read by channels/webPush.js, and deleted
+ * when the push service says it is gone, when that browser turns
+ * notifications off or signs out, and on "sign out everywhere".
  */
 const pushSubscriptionSchema = new mongoose.Schema(
   {

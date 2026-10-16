@@ -4,6 +4,7 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { GuestRoute } from './components/GuestRoute';
 import { DeviceLayout } from './components/DeviceLayout';
 import { DevicesProvider } from './context/DevicesContext';
+import { usePushNavigation, usePushSync } from './hooks/usePushNotifications';
 import { Home } from './pages/Home';
 import { AddDevice } from './pages/AddDevice';
 import { DeviceOverview } from './pages/DeviceOverview';
@@ -25,6 +26,8 @@ import styles from './App.module.css';
  * shell also renders the list of them.
  */
 function AppShell() {
+  usePushSync();
+
   return (
     <DevicesProvider>
       <div className={styles.shell}>
@@ -61,6 +64,8 @@ function AppShell() {
  *   3. add an entry to the tabs array in components/TabNav.jsx
  */
 export function App() {
+  usePushNavigation();
+
   return (
     <Routes>
       <Route element={<GuestRoute />}>

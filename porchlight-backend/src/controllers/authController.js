@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { User } from '../models/User.js';
 import { PasswordReset } from '../models/PasswordReset.js';
+import { PushSubscription } from '../models/PushSubscription.js';
 import { sendPasswordResetEmail, sendPasswordChangedEmail } from '../services/accountEmails.js';
 import { consume, peek, forget } from '../utils/rateLimit.js';
 import { disconnectUser } from '../signaling/index.js';
@@ -157,9 +158,14 @@ export async function me(req, res) {
  * when it opened, and would otherwise outlive the token that opened it.
  * A media token already handed out still lapses on its own, within two
  * minutes.
+ *
+ * Push subscriptions go too. Each one is a browser that will keep
+ * showing this account's doorbell alerts without ever presenting a
+ * token, so "everyone else is out" has to include them.
  */
 export async function signOutEverywhere(req, res) {
   await User.updateOne({ _id: req.userId }, { $inc: { tokenVersion: 1 } });
+  await PushSubscription.deleteMany({ user: req.userId });
   disconnectUser(req.userId);
   return res.status(204).end();
 }
@@ -253,6 +259,9 @@ export async function resetPassword(req, res) {
   }
 
   disconnectUser(user._id.toString());
+  // Same reason as signOutEverywhere: a browser someone else subscribed
+  // would otherwise go on showing them this account's alerts.
+  await PushSubscription.deleteMany({ user: user._id });
   // Whoever just proved they own the inbox should not then be locked out
   // by guesses someone else made at the old password.
   forget('login:email', user.email);

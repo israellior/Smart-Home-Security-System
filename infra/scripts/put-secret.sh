@@ -38,6 +38,16 @@ if [[ "$NAME" == "CLAIM_CODE_PEPPER" && $FORCE -eq 0 ]] &&
   exit 1
 fi
 
+# Every browser that turned notifications on subscribed with the public
+# half of this pair. Replacing either half means none of them receives
+# anything until each person turns notifications on again.
+if [[ "$NAME" == VAPID_* && $FORCE -eq 0 ]] &&
+  aws ssm get-parameter --region "$REGION" --name "$PARAM" > /dev/null 2>&1; then
+  echo "$NAME already exists. Replacing it stops notifications on every phone" >&2
+  echo "and browser until each one turns them on again. Add --force if you mean it." >&2
+  exit 1
+fi
+
 if ((GENERATE)); then
   VALUE=$(node -e "process.stdout.write(require('crypto').randomBytes(32).toString('hex'))")
 else

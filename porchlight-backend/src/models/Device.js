@@ -162,7 +162,13 @@ const deviceSchema = new mongoose.Schema(
     // automatically - every night would be another five-minute outage and
     // another rollback - until a newer one is published. Update now can
     // still ask for it.
-    failedVersion: { type: String, default: null }
+    failedVersion: { type: String, default: null },
+
+    // When motion last pushed a notification - see MOTION_COOLDOWN_MS in
+    // services/notifications/index.js. On the device rather than in
+    // memory so the claim is one atomic write that any number of API
+    // processes agree on.
+    motionAlertedAt: { type: Date, default: null }
   },
   { timestamps: true }
 );

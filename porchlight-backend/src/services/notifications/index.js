@@ -1,3 +1,4 @@
+import { Device } from '../../models/Device.js';
 import { Membership } from '../../models/Membership.js';
 import { PushSubscription } from '../../models/PushSubscription.js';
 import { NotificationDelivery } from '../../models/NotificationDelivery.js';
@@ -13,6 +14,37 @@ const PREFERENCE_BY_EVENT_TYPE = {
   motion: 'notifMotion',
   ring: 'notifRing'
 };
+
+// Someone walking up the path, standing at the door and walking away is
+// one visit and a dozen motion triggers. Every one of them is in the
+// activity list; only the first in this window buzzes a phone. Rings are
+// never held back - a ring is a person asking for you.
+const MOTION_COOLDOWN_MS = 3 * 60 * 1000;
+
+// A doorbell that was offline sends what it held when it comes back, with
+// the time each thing really happened. Those belong in the activity list,
+// not on a lock screen as if they were happening now.
+const STALE_AFTER_MS = 10 * 60 * 1000;
+
+/**
+ * Claims the motion window for this doorbell, or reports it already
+ * taken. A conditional update, so two motion events arriving together
+ * cannot both win - whichever write lands first does.
+ */
+async function claimMotionAlert(device) {
+  const now = new Date();
+  const result = await Device.updateOne(
+    {
+      _id: device._id,
+      $or: [
+        { motionAlertedAt: null },
+        { motionAlertedAt: { $lte: new Date(now.getTime() - MOTION_COOLDOWN_MS) } }
+      ]
+    },
+    { $set: { motionAlertedAt: now } }
+  );
+  return result.modifiedCount === 1;
+}
 
 const COPY_BY_EVENT_TYPE = {
   motion: { title: 'Motion detected', body: (device) => `Movement at ${device.name}` },
@@ -36,6 +68,15 @@ const COPY_BY_EVENT_TYPE = {
 export async function dispatchEventNotifications(device, event) {
   const preferenceKey = PREFERENCE_BY_EVENT_TYPE[event.type];
   if (!preferenceKey) return { recipients: 0, deliveries: 0 };
+
+  // Neither of these is written to the delivery log: they are decisions
+  // about the event, made once, not about any one person's delivery.
+  if (event.at && Date.now() - new Date(event.at).getTime() > STALE_AFTER_MS) {
+    return { recipients: 0, deliveries: 0, skipped: 'stale' };
+  }
+  if (event.type === 'motion' && !(await claimMotionAlert(device))) {
+    return { recipients: 0, deliveries: 0, skipped: 'motion cooldown' };
+  }
 
   // Query 1. Served by the leading field of the { device, user } index.
   const memberships = await Membership.find({
@@ -68,6 +109,9 @@ export async function dispatchEventNotifications(device, event) {
     title: copy.title,
     body: copy.body(device),
     url: `/devices/${device._id}/activity`,
+    // One notification per doorbell per kind: a second ring replaces the
+    // first on the lock screen (and alerts again) instead of stacking.
+    tag: `${event.type}-${device._id}`,
     device,
     event
   };

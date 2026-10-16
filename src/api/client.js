@@ -53,6 +53,17 @@ export const api = {
   signOutEverywhere: (token) =>
     request('/auth/sign-out-everywhere', { method: 'POST', token }),
 
+  // Web Push. The key is public and needs no login. A subscription is
+  // this browser's, keyed on its endpoint; PUT again whenever it might
+  // have changed. The test goes to this browser only.
+  getPushKey: () => request('/push/key'),
+  savePushSubscription: (token, subscription) =>
+    request('/push/subscriptions', { method: 'PUT', body: subscription, token }),
+  deletePushSubscription: (token, endpoint) =>
+    request('/push/subscriptions', { method: 'DELETE', body: { endpoint }, token }),
+  sendTestPush: (token, endpoint) =>
+    request('/push/test', { method: 'POST', body: { endpoint }, token }),
+
   listDevices: (token) => request('/devices', { token }),
   getDevice: (token, id) => request(`/devices/${id}`, { token }),
   createDevice: (token, payload) => request('/devices', { method: 'POST', body: payload, token }),
