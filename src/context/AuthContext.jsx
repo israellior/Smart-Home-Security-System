@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useReducer } from 'react';
 import { api, SESSION_ENDED } from '../api/client';
-import { unsubscribe as unsubscribeFromPush } from '../lib/push';
+import { pushState, unsubscribe as unsubscribeFromPush } from '../lib/push';
 
 const AuthContext = createContext(null);
 
@@ -66,6 +66,11 @@ function authReducer(state, action) {
       // Login and register both hand back the token and the user
       // together, so there is nothing left to look up afterwards.
       return { status: 'authenticated', token: action.token, user: action.user };
+
+    case 'profile_updated':
+      // Same session, new details - only ever from an authenticated state.
+      if (state.status !== 'authenticated') return state;
+      return { ...state, user: action.user };
 
     case 'signed_out':
       // Same resulting state as verification_failed, deliberately a
@@ -145,6 +150,40 @@ export function AuthProvider({ children }) {
   // alerts - on a shared computer, the next person would otherwise see
   // them. Best effort and not awaited: leaving must never wait on a push
   // service. The token is captured before the dispatch clears it.
+  const updateProfile = useCallback(
+    async (fields) => {
+      const { user } = await api.updateMe(token, fields);
+      dispatch({ type: 'profile_updated', user });
+    },
+    [token]
+  );
+
+  // Signs out every other session; this one carries on with the new
+  // token the server hands back. This browser's push subscription is
+  // named so it survives - the others are removed with their sessions.
+  const changePassword = useCallback(
+    async (currentPassword, newPassword) => {
+      const { endpoint } = await pushState().catch(() => ({ endpoint: null }));
+      const { token: next, user } = await api.changePassword(token, {
+        currentPassword,
+        newPassword,
+        ...(endpoint && { keepEndpoint: endpoint })
+      });
+      dispatch({ type: 'signed_in', token: next, user });
+    },
+    [token]
+  );
+
+  const deleteAccount = useCallback(
+    async (password) => {
+      await api.deleteAccount(token, password);
+      // The server already removed the subscription; this is the browser's half.
+      unsubscribeFromPush(null).catch(() => {});
+      dispatch({ type: 'signed_out' });
+    },
+    [token]
+  );
+
   const logout = useCallback(() => {
     unsubscribeFromPush(token).catch(() => {});
     dispatch({ type: 'signed_out' });
@@ -176,7 +215,22 @@ export function AuthProvider({ children }) {
   const loading = status === 'checking';
 
   return (
-    <AuthContext.Provider value={{ status, token, user, loading, login, register, resetPassword, logout, signOutEverywhere }}>
+    <AuthContext.Provider
+      value={{
+        status,
+        token,
+        user,
+        loading,
+        login,
+        register,
+        resetPassword,
+        updateProfile,
+        changePassword,
+        deleteAccount,
+        logout,
+        signOutEverywhere
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

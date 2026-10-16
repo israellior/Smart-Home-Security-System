@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { isIos } from '../lib/push';
 import styles from './PushSection.module.css';
@@ -7,10 +8,24 @@ import styles from './PushSection.module.css';
  * per-doorbell toggles in Settings, and says so: it is one switch per
  * browser, for every doorbell on the account, where the toggles below it
  * choose what each doorbell sends.
+ *
+ * Its home is Account settings. A doorbell's Settings shows it `compact`:
+ * nothing while checking, one line once it's on, and the whole thing only
+ * when there is something to do - that is where people look for it.
  */
-export function PushSection() {
+export function PushSection({ compact = false }) {
   const { status, busy, message, enable, disable, sendTest } = usePushNotifications();
   const thing = isIos() || /Android/.test(navigator.userAgent) ? 'phone' : 'device';
+
+  if (compact && status === 'loading') return null;
+  if (compact && status === 'on') {
+    return (
+      <p className={styles.compactOn}>
+        <span className={styles.dot} aria-hidden="true" />
+        Alerts come to this {thing}. <Link to="/account#notifications">Manage</Link>
+      </p>
+    );
+  }
 
   let tone = 'neutral';
   let text;

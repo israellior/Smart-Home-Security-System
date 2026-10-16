@@ -9,11 +9,13 @@
   border-bottom: 1px solid var(--line);
 }
 
-.fieldGroup:first-of-type {
+.fieldGroup:first-of-type,
+.sectionLabel + .fieldGroup {
   border-top: 1px solid var(--line);
 }
 
 .fieldLabel {
+  display: block;
   font-size: 15px;
   margin: 0 0 2px;
 }
@@ -49,6 +51,18 @@
   margin: 0;
 }
 
+.toggleText .toggleHelp {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.note {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 8px 0 0;
+}
+
 .aboutRow {
   display: flex;
   justify-content: space-between;
@@ -58,18 +72,49 @@
 
 .aboutRow span:first-child {
   color: var(--muted);
+  flex-shrink: 0;
 }
 
-.saveNote {
+.aboutRow span:last-child {
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13px;
-  color: var(--moss);
+}
+
+.accountLink {
+  font-size: 13px;
+  color: var(--muted);
   text-align: center;
-  height: 18px;
-  margin-top: 18px;
+  margin: 32px 0 0;
+}
+
+.accountLink a {
+  color: var(--brass);
+}
+
+/* Floats over the page rather than sitting at its foot: Settings is long,
+   and a toggle near the top would otherwise flash "Saved" off-screen. */
+.saveNote {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translate(-50%, 8px);
+  font-size: 13px;
+  color: var(--bg);
+  background: var(--moss);
+  padding: 7px 16px;
+  border-radius: 999px;
+  margin: 0;
   opacity: 0;
-  transition: opacity 0.3s ease;
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease;
 }
 
 .saveNote.show {
   opacity: 1;
+  transform: translate(-50%, 0);
 }

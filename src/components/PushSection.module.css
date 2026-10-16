@@ -88,3 +88,24 @@
 .error {
   color: var(--ember);
 }
+
+.compactOn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  margin: 10px 0 0;
+}
+
+.compactOn a {
+  color: var(--brass);
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--moss);
+  flex-shrink: 0;
+}

@@ -56,7 +56,9 @@ function progressLine(update) {
   }
 }
 
-export function SoftwareSection({ device }) {
+// `canManage` is the owner's, as with Wi-Fi: Update now and the overnight
+// switch restart the doorbell for everyone. Members see where it stands.
+export function SoftwareSection({ device, canManage }) {
   const { token } = useAuth();
   const { updateDevice } = useDevices();
   const { software: live } = useDeviceLive();
@@ -178,7 +180,7 @@ export function SoftwareSection({ device }) {
           </details>
         )}
 
-        {offerButton && (
+        {offerButton && canManage && (
           <div className={styles.actions}>
             <button
               type="button"
@@ -197,7 +199,14 @@ export function SoftwareSection({ device }) {
         )}
         {error && <p className={styles.error}>{error}</p>}
 
-        {canUpdateItself && (
+        {canUpdateItself && !canManage && (
+          <p className={styles.hint}>
+            {autoUpdate ? 'Updates itself overnight.' : 'Automatic updates are off.'} Only the owner can
+            change this.
+          </p>
+        )}
+
+        {canUpdateItself && canManage && (
           <div className={styles.toggleRow}>
             <div>
               <p className={styles.label}>Update automatically</p>

@@ -52,6 +52,13 @@ export const api = {
   me: (token) => request('/auth/me', { token }),
   signOutEverywhere: (token) =>
     request('/auth/sign-out-everywhere', { method: 'POST', token }),
+  // A wrong password on these two answers 403, never 401 - a 401 here
+  // would read as "session over" and sign this tab out (see request()).
+  updateMe: (token, fields) => request('/auth/me', { method: 'PATCH', body: fields, token }),
+  changePassword: (token, payload) =>
+    request('/auth/change-password', { method: 'POST', body: payload, token }),
+  deleteAccount: (token, password) =>
+    request('/auth/me', { method: 'DELETE', body: { password }, token }),
 
   // Web Push. The key is public and needs no login. A subscription is
   // this browser's, keyed on its endpoint; PUT again whenever it might

@@ -10,6 +10,7 @@ import { AddDevice } from './pages/AddDevice';
 import { DeviceOverview } from './pages/DeviceOverview';
 import { Activity } from './pages/Activity';
 import { Settings } from './pages/Settings';
+import { Account } from './pages/Account';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { ForgotPassword } from './pages/ForgotPassword';
@@ -52,6 +53,7 @@ function AppShell() {
  *                            browser is signed in
  *
  *   /                        the list of your doorbells
+ *   /account                 you: name, password, alerts on this device, theme
  *   /devices/new             create one, or join with a share code
  *   /devices/:deviceId       one doorbell, via DeviceLayout:
  *     .                        overview
@@ -78,6 +80,7 @@ export function App() {
       <Route element={<ProtectedRoute />}>
         <Route element={<AppShell />}>
           <Route path="/" element={<Home />} />
+          <Route path="/account" element={<Account />} />
           <Route path="/devices/new" element={<AddDevice />} />
 
           <Route element={<DeviceLayout />}>

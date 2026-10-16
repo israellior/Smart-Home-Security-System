@@ -4,6 +4,8 @@ import jwt from 'jsonwebtoken';
 import { User } from '../models/User.js';
 import { PasswordReset } from '../models/PasswordReset.js';
 import { PushSubscription } from '../models/PushSubscription.js';
+import { Membership } from '../models/Membership.js';
+import { purgeDevice } from '../services/devices.js';
 import { sendPasswordResetEmail, sendPasswordChangedEmail } from '../services/accountEmails.js';
 import { consume, peek, forget } from '../utils/rateLimit.js';
 import { disconnectUser } from '../signaling/index.js';
@@ -273,3 +275,120 @@ export async function resetPassword(req, res) {
   const sessionToken = signToken(user);
   return res.json({ token: sessionToken, user: publicUser(user) });
 }
+
+/** Your name: what greetings use, and what people you share with see. */
+export async function updateMe(req, res) {
+  const { name } = req.body || {};
+  if (typeof name !== 'string' || !name.trim()) {
+    return res.status(400).json({ error: 'Your name cannot be empty' });
+  }
+  if (name.trim().length > MAX_NAME) {
+    return res.status(400).json({ error: `Name must be at most ${MAX_NAME} characters` });
+  }
+
+  const user = await User.findByIdAndUpdate(req.userId, { $set: { name: name.trim() } }, { new: true });
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  return res.json({ user: publicUser(user) });
+}
+
+/**
+ * Checks the password of a signed-in user, for the two account actions
+ * that ask for it again. Wrong guesses are charged to the same per-email
+ * bucket as the login form - a stolen session must not become a way to
+ * guess at the password with no limit.
+ *
+ * A wrong password is a 403, not a 401. The app reads any 401 on a
+ * request that carried a token as "this session is over" and signs out
+ * (api/client.js) - right for an expired token, and exactly wrong for a
+ * typo in a form.
+ *
+ * Returns the user, or sends the refusal and returns null.
+ */
+async function confirmPassword(req, res, password) {
+  const user = await User.findById(req.userId);
+  if (!user) {
+    res.status(404).json({ error: 'User not found' });
+    return null;
+  }
+
+  const perEmail = peek('login:email', user.email, LOGIN_LIMIT_PER_EMAIL);
+  if (!perEmail.allowed) {
+    tooMany(res, perEmail.retryAfterMs);
+    return null;
+  }
+
+  if (typeof password !== 'string' || !(await bcrypt.compare(password, user.passwordHash))) {
+    consume('login:email', user.email, LOGIN_LIMIT_PER_EMAIL);
+    res.status(403).json({ error: 'That password is not right' });
+    return null;
+  }
+  return user;
+}
+
+/**
+ * Changing your password while signed in. Like a reset, it signs out
+ * everywhere else and emails that it happened; unlike a reset, this
+ * session carries on with a fresh token, and this browser keeps its
+ * notifications if it says which subscription is its own.
+ */
+export async function changePassword(req, res) {
+  const { currentPassword, newPassword, keepEndpoint } = req.body || {};
+
+  if (typeof newPassword !== 'string' || newPassword.length < 8) {
+    return res.status(400).json({ error: 'Your new password must be at least 8 characters' });
+  }
+
+  const user = await confirmPassword(req, res, currentPassword);
+  if (!user) return undefined;
+
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+  const updated = await User.findOneAndUpdate(
+    { _id: user._id },
+    { $set: { passwordHash }, $inc: { tokenVersion: 1 } },
+    { new: true }
+  );
+
+  disconnectUser(String(updated._id));
+  await PushSubscription.deleteMany({
+    user: updated._id,
+    ...(typeof keepEndpoint === 'string' && { endpoint: { $ne: keepEndpoint } })
+  });
+  forget('login:email', updated.email);
+
+  sendPasswordChangedEmail(updated).catch((err) => {
+    console.error('[auth] password changed email failed:', err.message);
+  });
+
+  return res.json({ token: signToken(updated), user: publicUser(updated) });
+}
+
+/**
+ * Deletes the account, and with it every doorbell it owns - for everyone
+ * those doorbells are shared with, clips included, exactly as "Delete
+ * this doorbell" would. Doorbells it was only a member of are left, with
+ * this person gone from them.
+ *
+ * Owned doorbells go first, so a failure partway leaves an account that
+ * can try again rather than doorbells whose owner no longer exists.
+ */
+export async function deleteAccount(req, res) {
+  const { password } = req.body || {};
+  const user = await confirmPassword(req, res, password);
+  if (!user) return undefined;
+
+  const owned = await Membership.find({ user: user._id, role: 'owner' }).populate('device');
+  for (const membership of owned) {
+    if (membership.device) await purgeDevice(membership.device);
+  }
+
+  await Membership.deleteMany({ user: user._id });
+  await PushSubscription.deleteMany({ user: user._id });
+  await PasswordReset.deleteMany({ user: user._id });
+  await User.deleteOne({ _id: user._id });
+
+  disconnectUser(String(user._id), 'Account deleted');
+  forget('login:email', user.email);
+
+  return res.status(204).end();
+}
+

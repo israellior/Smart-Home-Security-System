@@ -54,7 +54,9 @@ export function ThemeProvider({ children }) {
   };
 
   return (
-    <ThemeContext.Provider value={{ theme, resolvedTheme, toggleTheme }}>
+    // setTheme(null) goes back to following the system - the one choice
+    // the header toggle alone can't make.
+    <ThemeContext.Provider value={{ theme, resolvedTheme, toggleTheme, setTheme }}>
       {children}
     </ThemeContext.Provider>
   );
