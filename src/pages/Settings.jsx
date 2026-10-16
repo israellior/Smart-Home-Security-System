@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useDevices } from '../context/DevicesContext';
 import { useDevice } from '../components/DeviceLayout';
 import { Toggle } from '../components/Toggle';
 import { SegmentedControl } from '../components/SegmentedControl';
 import { DeviceSharing } from '../components/DeviceSharing';
 import { SoftwareSection } from '../components/SoftwareSection';
+import { WifiSection } from '../components/WifiSection';
 import styles from './Settings.module.css';
 
 const SENSITIVITY_OPTIONS = [
@@ -30,6 +32,13 @@ export function Settings() {
   // 1400ms leaves a timer running against an unmounted component. React 18
   // dropped the warning for that, so it fails silently rather than loudly.
   useEffect(() => () => clearTimeout(saveTimer.current), []);
+
+  // Arriving from "Changed your Wi-Fi?" on the device page. The router does
+  // not scroll to a #fragment on its own.
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (hash) document.getElementById(hash.slice(1))?.scrollIntoView({ block: 'start' });
+  }, [hash]);
 
   const patch = (fields) => updateDevice(device._id, fields);
 
@@ -131,6 +140,7 @@ export function Settings() {
 
       <DeviceSharing device={device} />
 
+      {device.provisioned && <WifiSection device={device} />}
       {device.provisioned && <SoftwareSection device={device} />}
 
       <p className={styles.sectionLabel}>About</p>

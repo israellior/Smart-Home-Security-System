@@ -86,6 +86,8 @@ register/login.
 | POST   | `/devices/:deviceId/talk`   (auth) | Take the microphone (last press wins) |
 | DELETE | `/devices/:deviceId/talk`   (auth) | Give it back — holder only |
 | POST   | `/devices/:deviceId/update` (auth) | Install the latest release now instead of tonight → 202 |
+| POST   | `/devices/:deviceId/wifi/scan` (auth) | Ask the doorbell which networks it sees → arrives as `wifi-networks` on the socket |
+| POST   | `/devices/:deviceId/wifi`   (auth) | `{ ssid, psk }` → move it to another network; it falls back if that one fails. Progress as `wifi-status` |
 | GET    | `/releases/latest`          (auth) | The release doorbells are being brought to: `{ version, notes, publishedAt }` |
 | POST   | `/releases`         (release token) | `{ version, notes, bytes, sha256 }` → a PUT grant for the bundle |
 | POST   | `/releases/:version/publish` (release token) | Bundle uploaded and the right size → offered to every doorbell |
@@ -479,6 +481,17 @@ decides when to ask and reads the outcome (`services/updates/index.js`).
   45 minutes is `failed`, and retried the next night.
 - Progress is pushed to the app as `software` frames; the device contract is
   in the device repo's `docs/server-brief.md`.
+
+## Changing a doorbell's Wi-Fi
+
+Online, from Settings: the app asks for a scan, the doorbell answers with what
+it sees, and `POST /wifi` hands it a network and password
+(`services/wifi.js`). Nothing is stored and the password is never logged; the
+doorbell keeps its old network until the new one reaches this server, and
+falls back otherwise. Offline - usually because the Wi-Fi itself changed - the
+doorbell cannot be asked anything, but after a restart it raises its setup
+network (`setupSsid`, kept from its last hello), and the app says how to use
+it.
 
 ### Playback
 

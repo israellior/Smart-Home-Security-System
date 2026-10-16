@@ -37,6 +37,11 @@ export function useDeviceSignal(token, deviceId) {
   // The doorbell's Wi-Fi signal in dBm, as it last reported it. Null when
   // it has not said, is not on Wi-Fi, or is not connected at all.
   const [rssi, setRssi] = useState(null);
+  // The network it is on, with the signal. Null for the same reasons.
+  const [ssid, setSsid] = useState(null);
+  // A Wi-Fi scan's results, and the last word on a move to another network.
+  const [wifiNetworks, setWifiNetworks] = useState(null);
+  const [wifiStatus, setWifiStatus] = useState(null);
 
   useEffect(() => {
     if (!token || !deviceId) return undefined;
@@ -52,6 +57,9 @@ export function useDeviceSignal(token, deviceId) {
     setRecorder(null);
     setTalker(null);
     setRssi(null);
+    setSsid(null);
+    setWifiNetworks(null);
+    setWifiStatus(null);
     setSoftware(null);
 
     let socket = null;
@@ -85,15 +93,26 @@ export function useDeviceSignal(token, deviceId) {
             setRecorder(frame.recorder ?? null);
             setTalker(frame.talker ?? null);
             setRssi(frame.rssi ?? null);
+            setSsid(frame.ssid ?? null);
             break;
           case 'presence':
             setConnected(Boolean(frame.connected));
             // The signal belonged to the connection that just went. A
             // doorbell coming back reports it again within moments.
-            if (!frame.connected) setRssi(null);
+            if (!frame.connected) {
+              setRssi(null);
+              setSsid(null);
+            }
             break;
           case 'link':
             setRssi(frame.rssi ?? null);
+            setSsid(frame.ssid ?? null);
+            break;
+          case 'wifi-networks':
+            setWifiNetworks({ networks: frame.networks || [], current: frame.current ?? null, at: Date.now() });
+            break;
+          case 'wifi-status':
+            setWifiStatus(frame);
             break;
           case 'talk-floor':
             setTalker(frame.userId ?? null);
@@ -123,6 +142,7 @@ export function useDeviceSignal(token, deviceId) {
       socket.onclose = (closeEvent) => {
         setConnected(null);
         setRssi(null);
+        setSsid(null);
         if (abandoned) return;
 
         // A rejected credential is a permanent answer - the same rule the
@@ -151,5 +171,17 @@ export function useDeviceSignal(token, deviceId) {
     };
   }, [token, deviceId]);
 
-  return { connected, lastEvent, lastClip, lastSaved, recorder, talker, rssi, software };
+  return {
+    connected,
+    lastEvent,
+    lastClip,
+    lastSaved,
+    recorder,
+    talker,
+    rssi,
+    ssid,
+    wifiNetworks,
+    wifiStatus,
+    software
+  };
 }

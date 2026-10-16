@@ -117,6 +117,13 @@ button.glowRing:focus-visible {
   color: var(--ember);
 }
 
+.wifiHelpLink {
+  display: inline-block;
+  font-size: 13px;
+  color: var(--brass);
+  margin: 0 0 6px;
+}
+
 .wifiAdvice {
   font-size: 12px;
   line-height: 1.45;

@@ -22,6 +22,7 @@ import {
   releaseRecordingIfHeld
 } from '../services/media/recordingFloor.js';
 import { onDeviceHello, handleUpdateStatus } from '../services/updates/index.js';
+import { relayNetworks, relayStatus } from '../services/wifi.js';
 import * as registry from './registry.js';
 import {
   ROLE_DEVICE,
@@ -160,15 +161,21 @@ function handleLink(socket, frame) {
   const { deviceKey } = socket.ctx;
   const rssi = frame.rssi;
   if (rssi !== null && !(Number.isFinite(rssi) && rssi >= -120 && rssi <= 0)) return;
+  // The network's name, from bridges that send it. At most 32 bytes in
+  // 802.11; anything else is not a network name.
+  const ssid =
+    typeof frame.ssid === 'string' && frame.ssid && Buffer.byteLength(frame.ssid) <= 32
+      ? frame.ssid
+      : null;
 
   const now = Date.now();
   const last = links.get(deviceKey);
   if (last && now - last.at < LINK_MIN_INTERVAL_MS) return;
 
   const value = rssi === null ? null : Math.round(rssi);
-  links.set(deviceKey, { rssi: value, at: now });
+  links.set(deviceKey, { rssi: value, ssid, at: now });
   for (const browser of registry.browserSockets(deviceKey)) {
-    send(browser, { type: 'link', rssi: value });
+    send(browser, { type: 'link', rssi: value, ssid });
   }
 }
 
@@ -495,7 +502,9 @@ async function handleHello(socket, frame) {
     peerId: role === ROLE_BROWSER ? nextPeerId++ : null,
     // A bridge new enough to install updates says so in its hello. One
     // that does not would ignore the update frame, so it is never sent one.
-    updater: role === ROLE_DEVICE && frame.updater === true
+    // The same for changing wi-fi.
+    updater: role === ROLE_DEVICE && frame.updater === true,
+    wifi: role === ROLE_DEVICE && frame.wifi === true
   };
 
   const displaced = registry.add(deviceKey, role, socket);
@@ -523,7 +532,8 @@ async function handleHello(socket, frame) {
     ...(role === ROLE_BROWSER && {
       recorder: whoIsRecording(deviceKey),
       talker: whoIsTalking(deviceKey),
-      rssi: links.get(deviceKey)?.rssi ?? null
+      rssi: links.get(deviceKey)?.rssi ?? null,
+      ssid: links.get(deviceKey)?.ssid ?? null
     })
   });
 
@@ -565,6 +575,14 @@ async function routeFrame(socket, frame) {
       // The daemon's bridge, which is the process on the network.
       if (role !== ROLE_DEVICE) return;
       return handleLink(socket, frame);
+
+    case 'wifi-networks':
+      if (role !== ROLE_DEVICE) return;
+      return relayNetworks(socket.ctx.device, frame);
+
+    case 'wifi-status':
+      if (role !== ROLE_DEVICE) return;
+      return relayStatus(socket.ctx.device, frame);
 
     case 'update-status':
       if (role !== ROLE_DEVICE) return;

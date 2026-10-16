@@ -1,0 +1,229 @@
+/* The same section rhythm as the rest of Settings - see SoftwareSection. */
+.sectionLabel {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 24px 0 4px;
+  scroll-margin-top: 16px;
+}
+
+.group {
+  padding: 8px 0 14px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  font-size: 14px;
+}
+
+.network {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.network svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.row .muted {
+  font-size: 14px;
+}
+
+.status {
+  margin: 4px 0 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--panel);
+  border-left: 3px solid var(--line);
+}
+
+.status p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.status p + p {
+  margin-top: 4px;
+}
+
+.tone_busy {
+  border-left-color: var(--brass);
+}
+
+.tone_good {
+  border-left-color: var(--moss);
+}
+
+.tone_bad {
+  border-left-color: var(--ember);
+}
+
+.changeBtn,
+.cancelBtn {
+  font: inherit;
+  font-size: 14px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.changeBtn {
+  margin: 4px 0 2px;
+}
+
+.changeBtn:hover,
+.cancelBtn:hover {
+  border-color: var(--brass);
+  color: var(--brass);
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 6px 0 4px;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* One row per network: a radio that is the whole row. */
+.option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 12px;
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  color: var(--ink);
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.option:last-child {
+  border-bottom: none;
+}
+
+.option svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.option:hover {
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+
+.optionOn,
+.optionOn:hover {
+  background: color-mix(in srgb, var(--brass) 13%, transparent);
+}
+
+.optionOn svg {
+  color: var(--brass);
+}
+
+.optionName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag {
+  flex: none;
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.input {
+  width: 100%;
+  font: inherit;
+  font-size: 15px;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 11px 13px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.connectBtn {
+  font: inherit;
+  font-size: 14px;
+  padding: 9px 20px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--brass) 55%, transparent);
+  background: color-mix(in srgb, var(--brass) 12%, transparent);
+  color: var(--brass);
+  cursor: pointer;
+}
+
+.connectBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.error {
+  font-size: 13px;
+  color: var(--ember);
+  margin: 6px 0 0;
+}
+
+/* What to do when the doorbell is offline: plain numbered steps. */
+.help {
+  margin: 6px 0 2px;
+}
+
+.helpTitle {
+  font-size: 15px;
+  margin: 0 0 4px;
+}
+
+.steps {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.steps li + li {
+  margin-top: 6px;
+}
