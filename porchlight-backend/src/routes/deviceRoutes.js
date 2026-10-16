@@ -112,9 +112,9 @@ deviceRoutes.post('/:deviceId/talk', requireDeviceAccess, takeTalk);
 deviceRoutes.delete('/:deviceId/talk', requireDeviceAccess, releaseTalk);
 
 // Install the latest release now rather than tonight.
-deviceRoutes.post('/:deviceId/update', requireDeviceAccess, requestUpdate);
+deviceRoutes.post('/:deviceId/update', requireDeviceAccess, requireDeviceOwner, requestUpdate);
 
 // Moving a doorbell to another wi-fi network while it is online. Answers
 // arrive on the socket; see services/wifi.js.
-deviceRoutes.post('/:deviceId/wifi/scan', requireDeviceAccess, scanWifi);
-deviceRoutes.post('/:deviceId/wifi', requireDeviceAccess, joinWifi);
+deviceRoutes.post('/:deviceId/wifi/scan', requireDeviceAccess, requireDeviceOwner, scanWifi);
+deviceRoutes.post('/:deviceId/wifi', requireDeviceAccess, requireDeviceOwner, joinWifi);

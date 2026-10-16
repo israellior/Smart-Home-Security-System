@@ -55,7 +55,10 @@ function OfflineHelp({ setupSsid }) {
   );
 }
 
-export function WifiSection({ device }) {
+// `canManage` is the owner's: moving a doorbell to another network changes
+// it for everyone, so only the owner is offered it (and the server only
+// accepts it from them). Everyone sees which network it's on.
+export function WifiSection({ device, canManage }) {
   const { token } = useAuth();
   const { rssi, ssid, wifiNetworks, wifiStatus } = useDeviceLive();
 
@@ -174,7 +177,7 @@ export function WifiSection({ device }) {
           </div>
         )}
 
-        {online && canChange && !joining && !open && (
+        {online && canChange && canManage && !joining && !open && (
           <button type="button" className={styles.changeBtn} onClick={startChange}>
             Change network
           </button>
@@ -259,10 +262,14 @@ export function WifiSection({ device }) {
 
         {error && <p className={styles.error}>{error}</p>}
 
-        {online && !canChange && (
+        {online && !canChange && canManage && (
           <p className={styles.muted}>
             Update the doorbell&apos;s software to change its Wi-Fi from here.
           </p>
+        )}
+
+        {online && !canManage && (
+          <p className={styles.muted}>Only the owner can change its Wi-Fi.</p>
         )}
 
         {!online && !joining && device.status !== 'never-connected' && (

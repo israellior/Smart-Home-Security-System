@@ -2,8 +2,6 @@ import mongoose from 'mongoose';
 import { Device } from '../models/Device.js';
 import { Membership } from '../models/Membership.js';
 import { Event, ALERT_RANKS } from '../models/Event.js';
-import { Clip } from '../models/Clip.js';
-import { storageConfigured, deleteClipObjects } from '../config/storage.js';
 import { generateShareCode, normalizeShareCode } from '../utils/shareCode.js';
 import {
   claimCodeConfigured,
@@ -12,19 +10,29 @@ import {
   normalizeClaimCode
 } from '../utils/claimCode.js';
 import { consume, forget } from '../utils/rateLimit.js';
-import { disconnectHardware } from '../signaling/index.js';
+import { purgeDevice } from '../services/devices.js';
 
 // Fields a client is allowed to set. Anything else in the body - owner,
 // connected, _id - is ignored rather than rejected, so a client sending
 // back a whole device document doesn't get an error, it just can't
 // escalate anything. `connected` is absent on purpose: only real
 // hardware reporting in should ever flip it.
-const EDITABLE_FIELDS = ['name', 'location', 'sensitivity', 'autoUpdate', 'timeZone'];
+const EDITABLE_FIELDS = ['name', 'location', 'autoUpdate', 'timeZone'];
+
+// What only the owner may change. Everyone with access lives with the
+// doorbell's name, where it is, and when it updates itself, so one person
+// decides them - the same rule as Wi-Fi and Update now (deviceRoutes).
+// timeZone is not here: it is set by whichever member's browser first
+// finds it missing (DeviceLayout), and it is a fact, not a choice.
+//
+// There used to be a `sensitivity` here too. The doorbell's PIR (an
+// AM312) has a fixed range and the doorbell never read the setting, so it
+// was a control that did nothing; the field stays on old documents.
+const OWNER_FIELDS = ['name', 'location', 'autoUpdate'];
 
 // The same 40 the inputs in the app allow, so nobody using the app can
 // meet this limit - it is for requests that did not come from the app.
 const MAX_TEXT = 40;
-const SENSITIVITIES = ['low', 'standard', 'high'];
 
 /**
  * Checks one editable field, returning an error message or null.
@@ -34,9 +42,6 @@ const SENSITIVITIES = ['low', 'standard', 'high'];
  * broken" - when the truth is "you sent something we don't take".
  */
 function invalidField(field, value) {
-  if (field === 'sensitivity') {
-    return SENSITIVITIES.includes(value) ? null : 'Sensitivity must be low, standard or high';
-  }
   if (field === 'autoUpdate') {
     return typeof value === 'boolean' ? null : 'autoUpdate must be true or false';
   }
@@ -477,6 +482,10 @@ export async function updateDevice(req, res) {
 
   const body = req.body || {};
 
+  if (req.membership.role !== 'owner' && OWNER_FIELDS.some((field) => field in body)) {
+    return res.status(403).json({ error: 'Only the doorbell owner can change that' });
+  }
+
   // All checked before any is applied, so a bad field cannot leave the
   // good ones half-written.
   for (const field of EDITABLE_FIELDS) {
@@ -511,46 +520,7 @@ export async function updatePreferences(req, res) {
 }
 
 export async function deleteDevice(req, res) {
-  const deviceId = req.device._id;
-
-  // Recordings first, and the bucket before the rows that point at it.
-  // A deleted doorbell leaving its video behind is the one failure here
-  // with a privacy cost - the other orphans are only clutter - and once
-  // the Clip rows are gone there is nothing left that knows the objects
-  // exist. Best-effort: a bucket that is unreachable must not block
-  // someone deleting their doorbell.
-  if (storageConfigured && req.device.deviceId) {
-    const clips = await Clip.find({ device: deviceId }, { eventId: 1 });
-    if (clips.length > 0) {
-      try {
-        await deleteClipObjects(req.device.deviceId, clips.map((c) => c.eventId));
-      } catch (err) {
-        console.error(`Could not remove clips for ${req.device.deviceId}:`, err.message);
-      }
-    }
-  }
-  await Clip.deleteMany({ device: deviceId });
-
-  // Mongo has no cascading deletes, so orphaned events and memberships
-  // are ours to clean up. Events first: if this dies halfway, a device
-  // with no events is a better failure than events pointing at nothing.
-  await Event.deleteMany({ device: deviceId });
-  await Membership.deleteMany({ device: deviceId });
-  await Device.deleteOne({ _id: deviceId });
-
-  // Tell the hardware, and only now that the record is actually gone -
-  // closing first would leave a window in which the doorbell reconnects
-  // and re-registers against a device we are halfway through deleting.
-  //
-  // This is the one refusal in the system that is genuinely permanent, so
-  // it is the one place the device is closed with 4002 unprompted: the
-  // credential will never authenticate again, and a doorbell that is
-  // never told keeps a socket open to a server that 401s its every call.
-  // No fault LED, no reconnect, nothing at the house to suggest anything
-  // is wrong. Which is also why deleting deserves a confirmation that
-  // says what it does to the unit on the wall.
-  disconnectHardware(String(deviceId), 'This doorbell was deleted');
-
+  await purgeDevice(req.device);
   return res.status(204).end();
 }
 
