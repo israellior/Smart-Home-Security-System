@@ -98,6 +98,13 @@ export const api = {
   requestUpdate: (token, deviceId) =>
     request(`/devices/${deviceId}/update`, { method: 'POST', token }),
 
+  // Wi-Fi. Both answer at once and report on the socket: the networks the
+  // doorbell sees as `wifi-networks`, and the move as `wifi-status`.
+  scanWifi: (token, deviceId) =>
+    request(`/devices/${deviceId}/wifi/scan`, { method: 'POST', token }),
+  joinWifi: (token, deviceId, ssid, psk) =>
+    request(`/devices/${deviceId}/wifi`, { method: 'POST', body: { ssid, psk }, token }),
+
   // Kept past the week for everyone on the doorbell, or not. Both answer
   // with the event as it now stands.
   saveEvent: (token, deviceId, eventId) =>

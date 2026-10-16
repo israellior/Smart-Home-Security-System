@@ -43,7 +43,7 @@ export function DeviceOverview() {
   const awaitingFirstContact = isAwaitingFirstContact(status);
   // Reported by the doorbell over its own socket, so it exists only while
   // that socket does - and is shown only then.
-  const { rssi } = useDeviceLive();
+  const { rssi, ssid } = useDeviceLive();
   const signal = status === 'online' ? wifiSignal(rssi) : null;
 
   /*
@@ -121,7 +121,7 @@ export function DeviceOverview() {
             title={`${signal.rssi} dBm`}
           >
             <WifiIcon size={14} level={signal.level} />
-            Wi-Fi signal: {signal.label}
+            {ssid ? `${ssid} · ${signal.label} signal` : `Wi-Fi signal: ${signal.label}`}
           </p>
         )}
         {/* Said once, here, with the thing to do about it - the live view
@@ -131,6 +131,14 @@ export function DeviceOverview() {
             Live video may stutter. Moving the router closer, or a Wi-Fi extender near the door,
             will help.
           </p>
+        )}
+        {/* The one thing worth doing about "Offline" that is not waiting:
+            a new router or password is the usual cause, and the way back
+            is on the Settings page. */}
+        {status === 'offline' && (
+          <Link className={styles.wifiHelpLink} to={`/devices/${device._id}/settings#wifi`}>
+            Changed your Wi-Fi?
+          </Link>
         )}
         {device.location && <p className={styles.deviceLocation}>{device.location}</p>}
 

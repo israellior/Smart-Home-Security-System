@@ -198,11 +198,21 @@ export async function handleUpdateStatus(device, frame) {
 export async function onDeviceHello(device, frame) {
   const version = typeof frame.version === 'string' && frame.version ? frame.version : null;
   const updater = frame.updater === true;
+  const wifi = frame.wifi === true;
+  const setupSsid =
+    typeof frame.setupSsid === 'string' && frame.setupSsid.length <= 32 ? frame.setupSsid : null;
   const now = new Date();
 
   const fresh = await Device.findByIdAndUpdate(
     device._id,
-    { $set: { firmware: { version, updater, reportedAt: now } } },
+    {
+      $set: {
+        firmware: { version, updater, wifi, reportedAt: now },
+        // Kept when a hello does not carry it, rather than wiped: it is what
+        // the app needs when this doorbell is offline.
+        ...(setupSsid && { setupSsid })
+      }
+    },
     { new: true }
   );
   if (!fresh) return;

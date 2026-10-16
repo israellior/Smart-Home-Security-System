@@ -29,6 +29,7 @@ import {
 } from '../controllers/recordingController.js';
 import { getViewerToken, takeTalk, releaseTalk } from '../controllers/mediaController.js';
 import { requestUpdate } from '../controllers/updateController.js';
+import { scanWifi, joinWifi } from '../controllers/wifiController.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireDeviceAccess, requireDeviceOwner } from '../middleware/deviceAccess.js';
 
@@ -112,3 +113,8 @@ deviceRoutes.delete('/:deviceId/talk', requireDeviceAccess, releaseTalk);
 
 // Install the latest release now rather than tonight.
 deviceRoutes.post('/:deviceId/update', requireDeviceAccess, requestUpdate);
+
+// Moving a doorbell to another wi-fi network while it is online. Answers
+// arrive on the socket; see services/wifi.js.
+deviceRoutes.post('/:deviceId/wifi/scan', requireDeviceAccess, scanWifi);
+deviceRoutes.post('/:deviceId/wifi', requireDeviceAccess, joinWifi);

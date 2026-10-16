@@ -8,6 +8,8 @@ const firmwareSchema = new mongoose.Schema(
   {
     version: { type: String, default: null },
     updater: { type: Boolean, default: false },
+    // Can be moved to another wi-fi network from the app.
+    wifi: { type: Boolean, default: false },
     reportedAt: { type: Date, default: null }
   },
   { _id: false }
@@ -140,6 +142,12 @@ const deviceSchema = new mongoose.Schema(
     // doorbell on a release from before updates ignores the update frame,
     // so it is never sent one.
     firmware: { type: firmwareSchema, default: null },
+
+    // The network this doorbell raises when it has none of its own - the
+    // one to join to give it a new one. Reported in its hello, and kept,
+    // because the one time it is needed the doorbell is offline and cannot
+    // be asked. Broadcast in the clear by the doorbell; not a secret.
+    setupSsid: { type: String, default: null },
 
     // Updates install themselves between 3 and 4 in the morning, the
     // doorbell's local time, unless an owner turns this off. `timeZone` is
