@@ -1,5 +1,18 @@
 /* What Account needs beyond the shared rhythm in Settings.module.css. */
 
+.back {
+  display: inline-block;
+  font-size: 13px;
+  color: var(--muted);
+  text-decoration: none;
+  padding: 4px 0;
+  transition: color 0.2s ease;
+}
+
+.back:hover {
+  color: var(--brass);
+}
+
 .title {
   font-family: var(--font-display);
   font-size: 26px;
