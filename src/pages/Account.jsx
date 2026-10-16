@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useDevices } from '../context/DevicesContext';
 import { useTheme } from '../context/ThemeContext';
@@ -26,13 +26,29 @@ const THEME_OPTIONS = [
  * .css), so the two read as one place with two pages.
  */
 export function Account() {
-  const { hash } = useLocation();
+  const { hash, key } = useLocation();
+  const navigate = useNavigate();
   useEffect(() => {
     if (hash) document.getElementById(hash.slice(1))?.scrollIntoView({ block: 'start' });
   }, [hash]);
 
+  // Installed on an iPhone's Home Screen, the app has no browser back
+  // button, so every page needs its own way out. Back to wherever you came
+  // from - often a doorbell's Settings - and home when there is nowhere
+  // in the app to go back to (React Router's first entry has key
+  // 'default'). A real href underneath, so it still works as a link.
+  const goBack = (e) => {
+    if (key !== 'default') {
+      e.preventDefault();
+      navigate(-1);
+    }
+  };
+
   return (
     <section>
+      <Link to="/" className={styles.back} onClick={goBack}>
+        ‹ Back
+      </Link>
       <h1 className={styles.title}>Account</h1>
       <Profile />
 
