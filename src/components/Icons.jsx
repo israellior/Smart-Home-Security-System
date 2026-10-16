@@ -192,3 +192,24 @@ export function BookmarkIcon({ filled = false, ...props }) {
     </Icon>
   );
 }
+
+// The eye with a line through it, for a password that is hidden. Drawn on
+// EyeIcon's outline so the show/hide button reads as one control changing
+// state.
+export function EyeOffIcon(props) {
+  return (
+    <Icon {...props}>
+      <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" />
+      <circle cx="12" cy="12" r="2.8" />
+      <path d="M4 4l16 16" />
+    </Icon>
+  );
+}
+
+export function CheckIcon(props) {
+  return (
+    <Icon {...props}>
+      <path d="M5 12.5l4.5 4.5L19 7.5" />
+    </Icon>
+  );
+}

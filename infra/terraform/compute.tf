@@ -17,9 +17,16 @@ resource "aws_instance" "api" {
 
   # IMDSv2 only. v1 answers any GET, which turns a server-side request
   # forgery bug into stolen instance credentials.
+  #
+  # Hop limit 2 so the API container can reach it: Docker's bridge network
+  # is one hop, and with a limit of 1 the token response dies on it. That
+  # is how the API sends email through SES on the instance role, with no
+  # key stored anywhere. Every container on the box can now get the role's
+  # credentials - which is two, the API and Caddy, both ours. Changing it
+  # is in place; the instance is not replaced.
   metadata_options {
     http_tokens                 = "required"
-    http_put_response_hop_limit = 1
+    http_put_response_hop_limit = 2
   }
 
   root_block_device {

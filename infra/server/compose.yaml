@@ -9,6 +9,9 @@ services:
     env_file: app.env
     environment:
       PORT: "4000"
+      # The SES client's region. Its credentials come from the instance
+      # role, through IMDS (hop limit 2 - see compute.tf).
+      AWS_REGION: ${AWS_REGION}
     # Not published. Only Caddy reaches it, over the compose network, so
     # nothing on the internet can talk to Node without going through TLS.
     expose:

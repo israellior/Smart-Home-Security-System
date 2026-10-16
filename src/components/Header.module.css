@@ -41,25 +41,6 @@
   opacity: 1;
 }
 
-.themeToggle {
-  border: 1px solid var(--line);
-  background: transparent;
-  color: var(--ink);
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  cursor: pointer;
-  font-size: 15px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: border-color 0.2s ease;
-}
-
-.themeToggle:hover {
-  border-color: var(--brass);
-}
-
 .logoutBtn {
   font-family: inherit;
   font-size: 13px;

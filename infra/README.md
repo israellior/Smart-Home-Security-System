@@ -146,8 +146,8 @@ infra/scripts/put-secret.sh R2_SECRET_ACCESS_KEY
 infra/scripts/put-secret.sh R2_BUCKET
 ```
 
-`PUBLIC_API_URL` and `CLIENT_ORIGIN` come from Terraform and follow
-the domain. A deploy refuses to start while any required value is
+`PUBLIC_API_URL`, `CLIENT_ORIGIN` and `EMAIL_FROM` come from Terraform
+and follow the domain. A deploy refuses to start while any required value is
 missing, and the error names each one.
 
 **`CLAIM_CODE_PEPPER` is permanent for this database.** Every claim code
@@ -219,6 +219,30 @@ that was provisioned before. Then claim the doorbell in the app with the
 new claim code. The file holds a live credential, so delete your copy
 once the Pi has consumed it.
 
+### 11. Account email
+
+Password resets are sent by SES as `no-reply@<domain>`. Terraform has
+already made the identity and its DKIM, MAIL FROM and DMARC records; SES
+marks the domain verified once it sees the DKIM CNAMEs, usually within
+minutes:
+
+```bash
+aws sesv2 get-email-identity --email-identity <domain>   --query '[VerifiedForSendingStatus, DkimAttributes.Status]'   # [true, "SUCCESS"]
+```
+
+**A new account is in the SES sandbox**: it can only send *to* addresses
+it has verified, so a real user's reset email is refused. Ask to leave it
+once, in the console (*SES → Account dashboard → Request production
+access*), or:
+
+```bash
+aws sesv2 put-account-details --production-access-enabled   --mail-type TRANSACTIONAL --website-url https://<domain>   --use-case-description "Password reset and password-changed emails for users of a home doorbell app. Sent one at a time, only when a user asks; no marketing, no lists."
+```
+
+AWS answers within a day. Until then, verify your own address to test
+with: `aws sesv2 create-email-identity --email-identity you@example.com`
+and click the link it sends.
+
 ---
 
 ## Operating it
@@ -259,5 +283,9 @@ In rough priority order:
 3. **Downtime per deploy** is a few seconds, longer when Atlas M0 fails TLS
    handshakes on the cold pool. It's inherent to single-instance; see the
    top of this file.
-4. **Web Push is still a stub.** HTTPS now exists, so it can be finished.
+4. **SES bounces and complaints aren't handled.** A reset sent to an address
+   that bounces is only logged by SES. At this volume that is fine; if the
+   bounce rate ever climbs, SES pauses sending for the account, so wire a
+   configuration set's events to SNS before then.
+5. **Web Push is still a stub.** HTTPS now exists, so it can be finished.
    See `porchlight-backend/src/services/notifications/channels/webPush.js`.

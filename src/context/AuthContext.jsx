@@ -133,6 +133,13 @@ export function AuthProvider({ children }) {
     dispatch({ type: 'signed_in', token, user });
   }, []);
 
+  // The link from a reset email signs you in, with the new password, as
+  // the same kind of transition as logging in with it.
+  const resetPassword = useCallback(async (resetToken, password) => {
+    const { token, user } = await api.resetPassword({ token: resetToken, password });
+    dispatch({ type: 'signed_in', token, user });
+  }, []);
+
   const logout = useCallback(() => {
     dispatch({ type: 'signed_out' });
   }, []);
@@ -163,7 +170,7 @@ export function AuthProvider({ children }) {
   const loading = status === 'checking';
 
   return (
-    <AuthContext.Provider value={{ status, token, user, loading, login, register, logout, signOutEverywhere }}>
+    <AuthContext.Provider value={{ status, token, user, loading, login, register, resetPassword, logout, signOutEverywhere }}>
       {children}
     </AuthContext.Provider>
   );
