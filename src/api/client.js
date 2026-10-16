@@ -45,6 +45,10 @@ async function request(path, { method = 'GET', body, token } = {}) {
 export const api = {
   register: (payload) => request('/auth/register', { method: 'POST', body: payload }),
   login: (payload) => request('/auth/login', { method: 'POST', body: payload }),
+  // Answers the same whether or not the address has an account.
+  forgotPassword: (email) =>
+    request('/auth/forgot-password', { method: 'POST', body: { email } }),
+  resetPassword: (payload) => request('/auth/reset-password', { method: 'POST', body: payload }),
   me: (token) => request('/auth/me', { token }),
   signOutEverywhere: (token) =>
     request('/auth/sign-out-everywhere', { method: 'POST', token }),

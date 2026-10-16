@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
-import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
+import { ThemeToggle } from './ThemeToggle';
 import styles from './Header.module.css';
 
 /**
@@ -10,9 +10,7 @@ import styles from './Header.module.css';
  * on each row of the Home list and on the device overview.
  */
 export function Header() {
-  const { resolvedTheme, toggleTheme } = useTheme();
   const { user, logout } = useAuth();
-  const isDark = resolvedTheme === 'dark';
 
   return (
     <header className={styles.header}>
@@ -20,14 +18,7 @@ export function Header() {
         Porchlight
       </Link>
       <div className={styles.right}>
-        <button
-          className={styles.themeToggle}
-          onClick={toggleTheme}
-          aria-label="Toggle light and dark theme"
-          title="Toggle theme"
-        >
-          {isDark ? '☾' : '◐'}
-        </button>
+        <ThemeToggle />
         {user && (
           <button className={styles.logoutBtn} onClick={logout} title={user.email}>
             Log out

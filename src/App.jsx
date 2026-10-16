@@ -1,6 +1,7 @@
 import { Routes, Route, Outlet } from 'react-router-dom';
 import { Header } from './components/Header';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { GuestRoute } from './components/GuestRoute';
 import { DeviceLayout } from './components/DeviceLayout';
 import { DevicesProvider } from './context/DevicesContext';
 import { Home } from './pages/Home';
@@ -10,6 +11,8 @@ import { Activity } from './pages/Activity';
 import { Settings } from './pages/Settings';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
+import { ForgotPassword } from './pages/ForgotPassword';
+import { ResetPassword } from './pages/ResetPassword';
 import styles from './App.module.css';
 
 /**
@@ -35,9 +38,15 @@ function AppShell() {
 }
 
 /**
- * Route table. /login and /register are public and have no chrome.
- * Everything else sits behind <ProtectedRoute>, which redirects to
- * /login if there's no valid session.
+ * Route table. The logged-out pages have no chrome of their own - they
+ * share AuthLayout instead. /login, /register and /forgot-password sit
+ * behind <GuestRoute>, which moves a signed-in visitor on. Everything
+ * else sits behind <ProtectedRoute>, which redirects to /login if there's
+ * no valid session.
+ *
+ *   /reset-password          the link from a reset email; outside both,
+ *                            because it has to work whether or not this
+ *                            browser is signed in
  *
  *   /                        the list of your doorbells
  *   /devices/new             create one, or join with a share code
@@ -54,8 +63,12 @@ function AppShell() {
 export function App() {
   return (
     <Routes>
-      <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
+      <Route element={<GuestRoute />}>
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+      </Route>
+      <Route path="/reset-password" element={<ResetPassword />} />
 
       <Route element={<ProtectedRoute />}>
         <Route element={<AppShell />}>

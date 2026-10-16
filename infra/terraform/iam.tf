@@ -74,6 +74,15 @@ resource "aws_iam_role_policy" "api" {
         Resource = "${aws_s3_bucket.releases.arn}/*"
       },
       {
+        # One identity, and only as no-reply@ - a bug in the API cannot
+        # send as anyone else at the domain.
+        Sid       = "SendAccountEmail"
+        Effect    = "Allow"
+        Action    = "ses:SendEmail"
+        Resource  = aws_sesv2_email_identity.domain.arn
+        Condition = { StringEquals = { "ses:FromAddress" = "no-reply@${var.domain}" } }
+      },
+      {
         Sid      = "ShipLogs"
         Effect   = "Allow"
         Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]

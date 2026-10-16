@@ -1,13 +1,26 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import styles from './Auth.module.css';
+import { AuthLayout } from '../components/AuthLayout';
+import {
+  Field,
+  FormError,
+  PasswordInput,
+  Requirement,
+  SubmitButton,
+  TextInput,
+  authErrorMessage
+} from '../components/AuthForm';
+
+// The server's rule (authController.register), shown before it is broken
+// rather than after.
+const MIN_PASSWORD = 8;
 
 export function Register() {
   const { register } = useAuth();
-  const navigate = useNavigate();
+  const location = useLocation();
   const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(location.state?.email || '');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -17,77 +30,80 @@ export function Register() {
     setError(null);
     setSubmitting(true);
     try {
-      await register(name, email, password);
-      navigate('/', { replace: true });
+      await register(name.trim(), email.trim(), password);
     } catch (err) {
-      setError(err.message);
-    } finally {
+      setError(authErrorMessage(err));
       setSubmitting(false);
     }
   };
 
-  return (
-    <div className={styles.wrap}>
-      <span className={styles.wordmark}>Porchlight</span>
-      <p className={styles.tagline}>Create your account</p>
+  const carry = { ...location.state, email: email.trim() || undefined };
 
-      {error && <p className={styles.error}>{error}</p>}
+  return (
+    <AuthLayout
+      title="Create your account"
+      subtitle="Then add your doorbell, or join one someone has shared with you."
+      footer={
+        <>
+          Already have an account?{' '}
+          <Link to="/login" state={carry}>
+            Log in
+          </Link>
+        </>
+      }
+    >
+      <FormError>{error}</FormError>
 
       <form onSubmit={handleSubmit}>
-        <div className={styles.field}>
-          <label className={styles.label} htmlFor="name">
-            Name
-          </label>
-          <input
+        <Field id="name" label="Name">
+          <TextInput
             id="name"
-            className={styles.input}
             type="text"
             autoComplete="name"
+            autoFocus
             required
+            maxLength={100}
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
-        </div>
+        </Field>
 
-        <div className={styles.field}>
-          <label className={styles.label} htmlFor="email">
-            Email
-          </label>
-          <input
+        <Field id="email" label="Email">
+          <TextInput
             id="email"
-            className={styles.input}
             type="email"
             autoComplete="email"
+            inputMode="email"
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
-        </div>
+        </Field>
 
-        <div className={styles.field}>
-          <label className={styles.label} htmlFor="password">
-            Password
-          </label>
-          <input
+        <Field
+          id="password"
+          label="Password"
+          hint={
+            <Requirement id="password-rule" met={password.length >= MIN_PASSWORD}>
+              At least {MIN_PASSWORD} characters
+            </Requirement>
+          }
+        >
+          <PasswordInput
             id="password"
-            className={styles.input}
-            type="password"
+            describedBy="password-rule"
             autoComplete="new-password"
-            minLength={8}
+            minLength={MIN_PASSWORD}
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
-        </div>
+        </Field>
 
-        <button className={styles.submit} type="submit" disabled={submitting}>
-          {submitting ? 'Creating account…' : 'Create account'}
-        </button>
+        <SubmitButton busy={submitting} busyLabel="Creating account…">
+          Create account
+        </SubmitButton>
       </form>
-
-      <p className={styles.switchLine}>
-        Already have an account? <Link to="/login">Log in</Link>
-      </p>
-    </div>
+    </AuthLayout>
   );
 }

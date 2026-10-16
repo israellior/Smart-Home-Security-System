@@ -1,0 +1,190 @@
+.field {
+  margin-bottom: 18px;
+}
+
+.labelRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 7px;
+}
+
+.label {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.labelRow a {
+  font-size: 13px;
+  color: var(--brass);
+  text-decoration: none;
+}
+
+.labelRow a:hover {
+  text-decoration: underline;
+}
+
+.input {
+  width: 100%;
+  font-size: 15px;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* On a phone there is no card behind the form, so the field takes the
+   panel colour the card would have had. */
+@media (max-width: 479px) {
+  .input {
+    background: var(--panel);
+  }
+}
+
+.input:hover {
+  border-color: color-mix(in srgb, var(--ink) 28%, transparent);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--brass);
+  box-shadow: 0 0 0 3px var(--brass-soft);
+}
+
+.passwordWrap {
+  position: relative;
+}
+
+.passwordInput {
+  padding-right: 48px;
+}
+
+.reveal {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.reveal:hover {
+  color: var(--ink);
+}
+
+.capsLock {
+  font-size: 13px;
+  color: var(--brass);
+  margin: 7px 0 0;
+}
+
+.requirement {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  margin: 7px 0 0;
+  transition: color 0.15s ease;
+}
+
+.requirement svg {
+  opacity: 0.35;
+  transition: opacity 0.15s ease;
+}
+
+.requirement.met {
+  color: var(--moss);
+}
+
+.requirement.met svg {
+  opacity: 1;
+}
+
+.error {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--ember);
+  background: color-mix(in srgb, var(--ember) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ember) 30%, transparent);
+  border-radius: 10px;
+  padding: 11px 13px;
+  margin-bottom: 20px;
+}
+
+.error svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.error a {
+  color: inherit;
+  font-weight: 500;
+}
+
+.submit {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--bg);
+  background: var(--brass);
+  border: none;
+  padding: 13px;
+  border-radius: 10px;
+  cursor: pointer;
+  margin-top: 8px;
+  transition: opacity 0.2s ease, transform 0.1s ease;
+}
+
+.submit:hover {
+  opacity: 0.9;
+}
+
+.submit:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.submit:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.spinner {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 1.6s;
+  }
+}

@@ -1,6 +1,9 @@
+import { createHash, randomBytes } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { User } from '../models/User.js';
+import { PasswordReset } from '../models/PasswordReset.js';
+import { sendPasswordResetEmail, sendPasswordChangedEmail } from '../services/accountEmails.js';
 import { consume, peek, forget } from '../utils/rateLimit.js';
 import { disconnectUser } from '../signaling/index.js';
 
@@ -27,6 +30,19 @@ const LOGIN_LIMIT_PER_IP = { limit: 30, windowMs: 15 * 60 * 1000 };
 // Every attempt counts here, success included, because a success is
 // itself the thing being limited: a new account, and a bcrypt hash.
 const REGISTER_LIMIT_PER_IP = { limit: 10, windowMs: 60 * 60 * 1000 };
+
+// Every request counts, whether or not the address has an account - the
+// limit has to behave the same either way or it becomes a way to find
+// out. Per email is what stops this being used to fill someone's inbox;
+// per IP is what stops one machine doing it to a list of people.
+const FORGOT_LIMIT_PER_EMAIL = { limit: 3, windowMs: 60 * 60 * 1000 };
+const FORGOT_LIMIT_PER_IP = { limit: 10, windowMs: 60 * 60 * 1000 };
+
+const RESET_TTL_MINUTES = 60;
+
+function hashResetToken(token) {
+  return createHash('sha256').update(token).digest('hex');
+}
 
 function signToken(user) {
   // "sub" (subject) is the standard JWT claim for "who is this token
@@ -146,4 +162,105 @@ export async function signOutEverywhere(req, res) {
   await User.updateOne({ _id: req.userId }, { $inc: { tokenVersion: 1 } });
   disconnectUser(req.userId);
   return res.status(204).end();
+}
+
+/**
+ * "Forgot password?" - emails a one-time link to choose a new one.
+ *
+ * Answers the same thing, at the same speed, whether or not the address
+ * has an account. The reply goes out before the lookup, and the lookup
+ * and the email happen afterwards: awaiting them would make a real
+ * account measurably slower to answer than a made-up one, which tells a
+ * script exactly what the identical wording was hiding.
+ */
+export async function forgotPassword(req, res) {
+  const { email } = req.body || {};
+  if (typeof email !== 'string' || email.length > MAX_EMAIL || !EMAIL_RE.test(email.trim())) {
+    return res.status(400).json({ error: 'Enter the email address you signed up with' });
+  }
+
+  const emailKey = email.trim().toLowerCase();
+
+  const perIp = consume('forgot:ip', req.ip, FORGOT_LIMIT_PER_IP);
+  const perEmail = consume('forgot:email', emailKey, FORGOT_LIMIT_PER_EMAIL);
+  if (!perIp.allowed || !perEmail.allowed) {
+    return tooMany(res, Math.max(perIp.retryAfterMs, perEmail.retryAfterMs));
+  }
+
+  res.status(202).json({ ok: true });
+
+  try {
+    const user = await User.findOne({ email: emailKey });
+    if (!user) return;
+
+    // Only the newest link works. Someone who asks twice and opens the
+    // first email would otherwise have two live ways into the account.
+    await PasswordReset.deleteMany({ user: user._id });
+
+    const token = randomBytes(32).toString('base64url');
+    await PasswordReset.create({
+      user: user._id,
+      tokenHash: hashResetToken(token),
+      expiresAt: new Date(Date.now() + RESET_TTL_MINUTES * 60 * 1000)
+    });
+
+    await sendPasswordResetEmail(user, token, RESET_TTL_MINUTES);
+  } catch (err) {
+    // The response has gone, so there is nobody left to tell but the log.
+    console.error('[auth] password reset email failed:', err.message);
+  }
+}
+
+/**
+ * The link from that email, with a new password. Signs in on success.
+ *
+ * The link is consumed by the same operation that checks it -
+ * findOneAndDelete - so two tabs submitting the one link cannot both
+ * succeed. No rate limit: the token is 256 random bits, and bcrypt only
+ * runs once one has matched.
+ *
+ * Changing the password signs out everywhere else, through the same
+ * tokenVersion bump as the button in Settings. Someone resetting their
+ * password is often doing it *because* somebody else got in, and leaving
+ * that person's session alive would make the reset pointless.
+ */
+export async function resetPassword(req, res) {
+  const { token, password } = req.body || {};
+
+  if (typeof token !== 'string' || !token || typeof password !== 'string') {
+    return res.status(400).json({ error: 'token and password are required' });
+  }
+  if (password.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  }
+
+  const reset = await PasswordReset.findOneAndDelete({
+    tokenHash: hashResetToken(token),
+    expiresAt: { $gt: new Date() }
+  });
+  if (!reset) {
+    return res.status(400).json({ error: 'This link has expired or has already been used' });
+  }
+
+  const passwordHash = await bcrypt.hash(password, 10);
+  const user = await User.findOneAndUpdate(
+    { _id: reset.user },
+    { $set: { passwordHash }, $inc: { tokenVersion: 1 } },
+    { new: true }
+  );
+  if (!user) {
+    return res.status(400).json({ error: 'This link has expired or has already been used' });
+  }
+
+  disconnectUser(user._id.toString());
+  // Whoever just proved they own the inbox should not then be locked out
+  // by guesses someone else made at the old password.
+  forget('login:email', user.email);
+
+  sendPasswordChangedEmail(user).catch((err) => {
+    console.error('[auth] password changed email failed:', err.message);
+  });
+
+  const sessionToken = signToken(user);
+  return res.json({ token: sessionToken, user: publicUser(user) });
 }
