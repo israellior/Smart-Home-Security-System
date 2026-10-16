@@ -1,0 +1,90 @@
+/* The status-panel-and-pill pattern from SoftwareSection, so the two
+   read as parts of one Settings page. */
+.wrap {
+  padding: 18px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.label {
+  font-size: 15px;
+  margin: 0 0 8px;
+}
+
+.status {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--panel);
+  border-left: 3px solid var(--line);
+}
+
+.text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.tone_good {
+  border-left-color: var(--moss);
+}
+
+.tone_news {
+  border-left-color: var(--brass);
+}
+
+.tone_bad {
+  border-left-color: var(--ember);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.button {
+  font: inherit;
+  font-size: 14px;
+  padding: 9px 18px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--brass) 55%, transparent);
+  background: color-mix(in srgb, var(--brass) 12%, transparent);
+  color: var(--brass);
+  cursor: pointer;
+}
+
+.quiet {
+  font: inherit;
+  font-size: 14px;
+  padding: 9px 12px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.quiet:hover {
+  color: var(--ember);
+}
+
+.button:disabled,
+.quiet:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.ok,
+.error {
+  font-size: 13px;
+  margin: 8px 0 0;
+}
+
+.ok {
+  color: var(--moss);
+}
+
+.error {
+  color: var(--ember);
+}

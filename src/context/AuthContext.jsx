@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useReducer } from 'react';
 import { api, SESSION_ENDED } from '../api/client';
+import { unsubscribe as unsubscribeFromPush } from '../lib/push';
 
 const AuthContext = createContext(null);
 
@@ -140,9 +141,14 @@ export function AuthProvider({ children }) {
     dispatch({ type: 'signed_in', token, user });
   }, []);
 
+  // Signing out also stops this browser getting the account's doorbell
+  // alerts - on a shared computer, the next person would otherwise see
+  // them. Best effort and not awaited: leaving must never wait on a push
+  // service. The token is captured before the dispatch clears it.
   const logout = useCallback(() => {
+    unsubscribeFromPush(token).catch(() => {});
     dispatch({ type: 'signed_out' });
-  }, []);
+  }, [token]);
 
   // Every token this account holds dies, this tab's included, so this tab
   // signs out as soon as the server says it is done.

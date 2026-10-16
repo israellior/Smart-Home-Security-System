@@ -7,6 +7,7 @@ import { SegmentedControl } from '../components/SegmentedControl';
 import { DeviceSharing } from '../components/DeviceSharing';
 import { SoftwareSection } from '../components/SoftwareSection';
 import { WifiSection } from '../components/WifiSection';
+import { PushSection } from '../components/PushSection';
 import styles from './Settings.module.css';
 
 const SENSITIVITY_OPTIONS = [
@@ -51,8 +52,9 @@ export function Settings() {
   };
 
   // Notification toggles write your membership, not the device. Everything
-  // above this line is shared with whoever else has access; these three
-  // are yours alone.
+  // above this line is shared with whoever else has access; these are
+  // yours alone. (notifDaily is stored too, but has no toggle until there
+  // is a daily summary to send.)
   const commitPrefsAndFlash = (prefs) => {
     updatePreferences(device._id, prefs);
     flashSaved();
@@ -102,9 +104,11 @@ export function Settings() {
       </div>
 
       <p className={styles.sectionLabel}>Notifications</p>
+      <PushSection />
       <div className={styles.fieldGroup}>
         <p className={styles.fieldHelp}>
-          Just for you — other people sharing this doorbell set their own.
+          What this doorbell alerts you about. Just for you — other people sharing it set
+          their own.
         </p>
         <div className={styles.toggleRow}>
           <div className={styles.toggleText}>
@@ -124,16 +128,6 @@ export function Settings() {
             label="Doorbell ring notifications"
             checked={device.notifRing}
             onChange={(notifRing) => commitPrefsAndFlash({ notifRing })}
-          />
-        </div>
-        <div className={styles.toggleRow}>
-          <div className={styles.toggleText}>
-            <p className={styles.fieldLabel}>Daily summary</p>
-          </div>
-          <Toggle
-            label="Daily summary notifications"
-            checked={device.notifDaily}
-            onChange={(notifDaily) => commitPrefsAndFlash({ notifDaily })}
           />
         </div>
       </div>

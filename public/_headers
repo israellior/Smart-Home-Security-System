@@ -20,3 +20,8 @@
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(self), geolocation=(), payment=(), usb=()
+
+# The service worker decides what notifications look like and where a tap
+# goes. A cached copy would keep an old one running after a deploy.
+/sw.js
+  Cache-Control: no-cache

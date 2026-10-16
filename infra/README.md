@@ -144,11 +144,21 @@ infra/scripts/put-secret.sh R2_ACCOUNT_ID
 infra/scripts/put-secret.sh R2_ACCESS_KEY_ID
 infra/scripts/put-secret.sh R2_SECRET_ACCESS_KEY
 infra/scripts/put-secret.sh R2_BUCKET
+
+# Web Push: one key pair, made locally, stored as two parameters.
+(cd porchlight-backend && npx web-push generate-vapid-keys)
+infra/scripts/put-secret.sh VAPID_PUBLIC_KEY    # once, ever - see below
+infra/scripts/put-secret.sh VAPID_PRIVATE_KEY
 ```
 
 `PUBLIC_API_URL`, `CLIENT_ORIGIN` and `EMAIL_FROM` come from Terraform
 and follow the domain. A deploy refuses to start while any required value is
 missing, and the error names each one.
+
+**The VAPID pair is permanent too.** Every browser that turned
+notifications on subscribed with its public half; replace it and they all
+go quiet until each person turns notifications on again. The script
+refuses to overwrite either without `--force`.
 
 **`CLAIM_CODE_PEPPER` is permanent for this database.** Every claim code
 is hashed under it, so replacing it silently invalidates every unclaimed
@@ -287,5 +297,7 @@ In rough priority order:
    that bounces is only logged by SES. At this volume that is fine; if the
    bounce rate ever climbs, SES pauses sending for the account, so wire a
    configuration set's events to SNS before then.
-5. **Web Push is still a stub.** HTTPS now exists, so it can be finished.
-   See `porchlight-backend/src/services/notifications/channels/webPush.js`.
+5. **Event alerts are push only.** The email channel for rings and motion
+   is still a stub (`channels/email.js`); SES now exists, so it can be
+   finished - but it is the right carrier for a daily summary, not for
+   every motion.
