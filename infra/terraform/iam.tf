@@ -74,12 +74,16 @@ resource "aws_iam_role_policy" "api" {
         Resource = "${aws_s3_bucket.releases.arn}/*"
       },
       {
-        # One identity, and only as no-reply@ - a bug in the API cannot
-        # send as anyone else at the domain.
+        # Only as no-reply@ - a bug in the API cannot send as anyone else
+        # at the domain. The resource is every identity in the account,
+        # not just the domain's, because in the SES sandbox the check also
+        # runs against the *recipient's* verified identity: scoped to the
+        # domain alone, every send to a verified test address was refused.
+        # The FromAddress condition is what does the limiting.
         Sid       = "SendAccountEmail"
         Effect    = "Allow"
         Action    = "ses:SendEmail"
-        Resource  = aws_sesv2_email_identity.domain.arn
+        Resource  = "arn:aws:ses:${var.region}:${data.aws_caller_identity.current.account_id}:identity/*"
         Condition = { StringEquals = { "ses:FromAddress" = "no-reply@${var.domain}" } }
       },
       {
