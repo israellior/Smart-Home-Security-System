@@ -159,18 +159,34 @@ export async function handleFacesStatus(device, frame) {
   toBrowsers(String(device._id), { type: 'faces-changed', revision: frame.revision });
 }
 
-/**
- * Who a motion alert says was at the door, by name - or null. The first
- * entry naming someone this doorbell still knows; a person deleted since the
- * alert was raised is nobody.
- */
-export async function knownVisitor(device, event) {
+function namedIn(event) {
   const faces = event?.meta?.faces;
-  if (!Array.isArray(faces)) return null;
-  for (const face of faces.slice(0, 4)) {
-    if (!isId(face?.person)) continue;
-    const person = await Person.findOne({ device: device._id, personId: face.person }, { name: 1 }).lean();
-    if (person) return person.name;
-  }
-  return null;
+  if (!Array.isArray(faces)) return [];
+  return faces.slice(0, 4).map((face) => face?.person).filter(isId);
+}
+
+/**
+ * Who each alert says was at the door, by name, in the order given - null
+ * where nobody known. The first entry naming someone this doorbell still
+ * knows; a person deleted since the alert was raised is nobody. One query for
+ * any number of events, so a page of the activity list costs one lookup.
+ */
+export async function visitorNames(deviceId, events) {
+  const ids = [...new Set(events.flatMap(namedIn))];
+  if (ids.length === 0) return events.map(() => null);
+  const people = await Person.find(
+    { device: deviceId, personId: { $in: ids } },
+    { personId: 1, name: 1 }
+  ).lean();
+  const names = new Map(people.map((p) => [p.personId, p.name]));
+  return events.map((event) => {
+    const known = namedIn(event).find((id) => names.has(id));
+    return known ? names.get(known) : null;
+  });
+}
+
+/** One alert's visitor, for its notification - see visitorNames. */
+export async function knownVisitor(device, event) {
+  const [name] = await visitorNames(device._id, [event]);
+  return name;
 }
