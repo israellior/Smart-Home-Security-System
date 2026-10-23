@@ -1,6 +1,8 @@
 node_modules/
 dist/
 dist-ssr/
+# Copied from node_modules by scripts/copy-mediapipe.mjs before dev and build.
+public/mediapipe/wasm/
 .env
 .env.local
 .env.*.local

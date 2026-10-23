@@ -1,0 +1,190 @@
+/* The same section rhythm as the rest of Settings - see Settings.module.css. */
+.sectionLabel {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 24px 0 4px;
+}
+
+.group {
+  padding: 8px 0 14px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.help {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 4px 0 10px;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.status {
+  margin: 4px 0 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--panel);
+  border-left: 3px solid var(--line);
+}
+
+.statusText {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.tone_quiet {
+  border-left-color: var(--brass);
+}
+
+.person {
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.person:first-of-type {
+  border-top: none;
+}
+
+.name {
+  font-size: 15px;
+  margin: 0 0 2px;
+}
+
+.line {
+  font-size: 13px;
+  margin: 0;
+}
+
+.text_good {
+  color: var(--moss);
+}
+
+.text_busy {
+  color: var(--brass);
+}
+
+.text_bad {
+  color: var(--ember);
+}
+
+.text_quiet {
+  color: var(--muted);
+}
+
+.actions,
+.confirm,
+.formActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  margin-top: 6px;
+}
+
+.confirmText {
+  flex-basis: 100%;
+  font-size: 13px;
+  margin: 0 0 4px;
+}
+
+.inline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.textInput {
+  font: inherit;
+  font-size: 15px;
+  width: 100%;
+  max-width: 320px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.linkBtn,
+.linkBtnDanger {
+  font: inherit;
+  font-size: 14px;
+  background: none;
+  border: none;
+  padding: 4px 0;
+  color: var(--brass);
+  cursor: pointer;
+}
+
+.linkBtnDanger {
+  color: var(--ember);
+}
+
+.linkBtn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.addBtn,
+.dangerBtn {
+  font: inherit;
+  font-size: 14px;
+  padding: 9px 18px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.addBtn {
+  margin-top: 10px;
+  border: 1px solid color-mix(in srgb, var(--brass) 55%, transparent);
+  background: color-mix(in srgb, var(--brass) 12%, transparent);
+  color: var(--brass);
+}
+
+.dangerBtn {
+  border: 1px solid color-mix(in srgb, var(--ember) 55%, transparent);
+  background: color-mix(in srgb, var(--ember) 12%, transparent);
+  color: var(--ember);
+}
+
+.addBtn:disabled,
+.dangerBtn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.addForm {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.addForm .addBtn {
+  margin-top: 0;
+}
+
+.fieldLabel {
+  display: block;
+  font-size: 15px;
+  margin: 0 0 2px;
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 6px 0 8px;
+  line-height: 1.5;
+}
+
+.error {
+  font-size: 13px;
+  color: var(--ember);
+  margin: 8px 0 0;
+}
