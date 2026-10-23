@@ -33,6 +33,19 @@ const EVENT_TITLES = {
   live: 'Recorded from live view'
 };
 
+// When the doorbell recognised who it was, the server names them as
+// `visitor`. Only ever a better title: a known face is still a motion or a
+// ring, and still sits under the same filter.
+const VISITOR_TITLES = {
+  motion: (name) => `${name} at the door`,
+  ring: (name) => `${name} rang the bell`
+};
+
+function titleOf(event) {
+  const named = event.visitor && VISITOR_TITLES[event.type];
+  return named ? named(event.visitor) : EVENT_TITLES[event.type] || event.type;
+}
+
 const EVENT_ICONS = {
   motion: MotionIcon,
   ring: BellIcon,
@@ -297,7 +310,10 @@ function mergeEvent(list, incoming) {
   // is read, not stored on the event - so a ring upgrading a motion that
   // already had its recording would otherwise lose its play button until
   // the next reload.
-  next.push(existing?.clip && !incoming.clip ? { ...incoming, clip: existing.clip } : incoming);
+  const merged = existing?.clip && !incoming.clip ? { ...incoming, clip: existing.clip } : incoming;
+  // Likewise the visitor's name, should a push have gone out without it -
+  // the server's lookup is best-effort.
+  next.push(existing?.visitor && !merged.visitor ? { ...merged, visitor: existing.visitor } : merged);
   next.sort((a, b) => new Date(b.at) - new Date(a.at) || (a._id < b._id ? 1 : -1));
   return next;
 }
@@ -544,7 +560,7 @@ export function Activity() {
     const isOpen = clip.eventId === event.eventId && Boolean(clip.url || clip.error);
     const isLoading = clip.eventId === event.eventId && clip.loading;
     const KindIcon = EVENT_ICONS[event.type] || MotionIcon;
-    const title = EVENT_TITLES[event.type] || event.type;
+    const title = titleOf(event);
     // Under a day heading the day is already said; the row needs only its
     // time. "New" rows have no day heading, so they keep the full form.
     const when = markNew

@@ -42,6 +42,10 @@ export function useDeviceSignal(token, deviceId) {
   // A Wi-Fi scan's results, and the last word on a move to another network.
   const [wifiNetworks, setWifiNetworks] = useState(null);
   const [wifiStatus, setWifiStatus] = useState(null);
+  // The saved faces changed - somebody added or removed one, or the doorbell
+  // finished learning them. Carries no list: whoever shows faces fetches it
+  // again. A fresh object each time, so the same revision twice still counts.
+  const [facesChanged, setFacesChanged] = useState(null);
 
   useEffect(() => {
     if (!token || !deviceId) return undefined;
@@ -61,6 +65,7 @@ export function useDeviceSignal(token, deviceId) {
     setWifiNetworks(null);
     setWifiStatus(null);
     setSoftware(null);
+    setFacesChanged(null);
 
     let socket = null;
     let retryTimer = null;
@@ -134,6 +139,9 @@ export function useDeviceSignal(token, deviceId) {
           case 'record-floor':
             setRecorder(frame.recorder ?? null);
             break;
+          case 'faces-changed':
+            setFacesChanged({ revision: frame.revision ?? null, at: Date.now() });
+            break;
           default:
             break;
         }
@@ -182,6 +190,7 @@ export function useDeviceSignal(token, deviceId) {
     ssid,
     wifiNetworks,
     wifiStatus,
-    software
+    software,
+    facesChanged
   };
 }

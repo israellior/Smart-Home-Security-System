@@ -8,6 +8,7 @@ import { DeviceDanger } from '../components/DeviceDanger';
 import { SoftwareSection } from '../components/SoftwareSection';
 import { WifiSection } from '../components/WifiSection';
 import { PushSection } from '../components/PushSection';
+import { PeopleSection } from '../components/PeopleSection';
 import { statusLabel } from '../lib/deviceStatus';
 import styles from './Settings.module.css';
 
@@ -25,8 +26,9 @@ function formatDate(value) {
 
 /**
  * One doorbell's settings, in the order people reach for them: what it's
- * called, what it tells *you*, who else has it, how it's connected, its
- * software, the facts about it - and, last, deleting or leaving it.
+ * called, what it tells *you*, whose faces it knows, who else has it, how
+ * it's connected, its software, the facts about it - and, last, deleting or
+ * leaving it.
  *
  * Everything shared (name, location, Wi-Fi, updates) is the owner's to
  * change; the server refuses anyone else, and this page shows them the
@@ -156,6 +158,9 @@ export function Settings() {
           />
         </div>
       </div>
+
+      {/* After the notifications, because that is what knowing a face changes. */}
+      {device.provisioned && <PeopleSection device={device} canManage={isOwner} />}
 
       <DeviceSharing device={device} />
 

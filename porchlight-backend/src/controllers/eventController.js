@@ -5,6 +5,7 @@ import { User } from '../models/User.js';
 import { ingestEvent, CREATED, REJECTED } from '../services/events/ingestEvent.js';
 import { retentionCutoff } from '../services/events/retention.js';
 import { eventBus, EVENT_SAVED } from '../services/events/eventBus.js';
+import { visitorNames } from '../services/faces.js';
 
 /**
  * Attaches clip metadata to a page of events.
@@ -36,6 +37,20 @@ async function withClips(events, deviceId) {
     }
     return json;
   });
+}
+
+/**
+ * The name of whoever the doorbell recognised, as `visitor`, so a row can
+ * say "Lior rang the bell". Looked up as the page is served rather than
+ * stored on the event: the doorbell sends ids, and a person renamed or
+ * deleted since should read that way in the list too.
+ */
+async function withVisitors(events, deviceId) {
+  const names = await visitorNames(deviceId, events);
+  names.forEach((name, i) => {
+    if (name) events[i].visitor = name;
+  });
+  return events;
 }
 
 // Both handlers run behind requireDeviceAccess, so req.device is already
@@ -144,7 +159,7 @@ export async function listEvents(req, res) {
   const nextCursor = hasMore ? encodeCursor(events[events.length - 1]) : null;
 
   return res.json({
-    events: await withClips(events, req.device._id),
+    events: await withVisitors(await withClips(events, req.device._id), req.device._id),
     nextCursor,
     // So the app can say how long things are kept, and know when unsaving
     // an old row would delete it, without a copy of the number to drift.
@@ -193,7 +208,9 @@ async function setSaved(req, res, saved) {
       console.error(`Save push failed for ${eventId}:`, err.message);
     }
   }
-  return res.json({ event: event.toJSON() });
+  // With its visitor, or the row the app swaps this in for loses the name.
+  const [json] = await withVisitors([event.toJSON()], req.device._id);
+  return res.json({ event: json });
 }
 
 export const saveEvent = (req, res) => setSaved(req, res, true);

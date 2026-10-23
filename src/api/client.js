@@ -2,14 +2,16 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
 export const SESSION_ENDED = 'porchlight:session-ended';
 
-async function request(path, { method = 'GET', body, token } = {}) {
-  const headers = { 'Content-Type': 'application/json' };
+// `blob` sends a file as the body, typed as itself, instead of JSON - the
+// face photos, which the server takes as raw image/jpeg.
+async function request(path, { method = 'GET', body, blob, token } = {}) {
+  const headers = { 'Content-Type': blob ? blob.type : 'application/json' };
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const res = await fetch(`${API_URL}${path}`, {
     method,
     headers,
-    body: body ? JSON.stringify(body) : undefined
+    body: blob ?? (body ? JSON.stringify(body) : undefined)
   });
 
   // 204 No Content (delete, leave) has no body to parse.
@@ -126,6 +128,20 @@ export const api = {
     request(`/devices/${deviceId}/wifi/scan`, { method: 'POST', token }),
   joinWifi: (token, deviceId, ssid, psk) =>
     request(`/devices/${deviceId}/wifi`, { method: 'POST', body: { ssid, psk }, token }),
+
+  // The people a doorbell knows by face. Any member sees the list; only the
+  // owner adds, renames or removes anyone. A photo is one cropped face as a
+  // JPEG - the doorbell turns it into its own codes, and answers on the
+  // socket as `faces-changed` once it has.
+  listPeople: (token, deviceId) => request(`/devices/${deviceId}/faces`, { token }),
+  createPerson: (token, deviceId, name) =>
+    request(`/devices/${deviceId}/faces`, { method: 'POST', body: { name }, token }),
+  renamePerson: (token, deviceId, personId, name) =>
+    request(`/devices/${deviceId}/faces/${personId}`, { method: 'PATCH', body: { name }, token }),
+  deletePerson: (token, deviceId, personId) =>
+    request(`/devices/${deviceId}/faces/${personId}`, { method: 'DELETE', token }),
+  addFacePhoto: (token, deviceId, personId, jpeg) =>
+    request(`/devices/${deviceId}/faces/${personId}/photos`, { method: 'POST', blob: jpeg, token }),
 
   // Kept past the week for everyone on the doorbell, or not. Both answer
   // with the event as it now stands.

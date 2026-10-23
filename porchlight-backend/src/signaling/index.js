@@ -23,7 +23,7 @@ import {
 } from '../services/media/recordingFloor.js';
 import { onDeviceHello, handleUpdateStatus } from '../services/updates/index.js';
 import { relayNetworks, relayStatus } from '../services/wifi.js';
-import { onFacesHello, handleFacesStatus } from '../services/faces.js';
+import { onFacesHello, handleFacesStatus, visitorNames } from '../services/faces.js';
 import * as registry from './registry.js';
 import {
   ROLE_DEVICE,
@@ -380,14 +380,29 @@ export function attachSignaling(server) {
   heartbeat.unref();
   wss.on('close', () => clearInterval(heartbeat));
 
+  // An event to everyone watching its doorbell, with the visitor's name when
+  // the doorbell recognised someone - as the activity list has it. The name
+  // is a query, so the frame goes out after it, but it always goes out: a
+  // name is a nicety, and the row is the news.
+  function pushEvent(device, event, type) {
+    const json = event.toJSON();
+    visitorNames(device._id, [json])
+      .then(([name]) => {
+        if (name) json.visitor = name;
+      })
+      .catch((err) => console.error(`Visitor name for a ${type} push failed:`, err.message))
+      .finally(() => {
+        for (const socket of registry.browserSockets(String(device._id))) send(socket, { type, event: json });
+      });
+  }
+
   eventBus.on(EVENT_INGESTED, ({ device, event }) => {
     // This runs inside ingestEvent's call stack, so a throw here would
     // fail the ingest that succeeded - and an alert that was stored but
     // unacknowledged gets sent again forever. Push is strictly
     // best-effort; storing was the job that mattered.
     try {
-      const payload = { type: 'event', event: event.toJSON() };
-      for (const socket of registry.browserSockets(String(device._id))) send(socket, payload);
+      pushEvent(device, event, 'event');
     } catch (err) {
       console.error('Live event push failed:', err.message);
     }
@@ -408,8 +423,7 @@ export function attachSignaling(server) {
   // shows its "deleted in two days" going away - without a reload.
   eventBus.on(EVENT_SAVED, ({ device, event }) => {
     try {
-      const payload = { type: 'event-saved', event: event.toJSON() };
-      for (const socket of registry.browserSockets(String(device._id))) send(socket, payload);
+      pushEvent(device, event, 'event-saved');
     } catch (err) {
       console.error('Save push failed:', err.message);
     }
