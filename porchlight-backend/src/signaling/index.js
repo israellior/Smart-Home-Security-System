@@ -23,6 +23,7 @@ import {
 } from '../services/media/recordingFloor.js';
 import { onDeviceHello, handleUpdateStatus } from '../services/updates/index.js';
 import { relayNetworks, relayStatus } from '../services/wifi.js';
+import { onFacesHello, handleFacesStatus } from '../services/faces.js';
 import * as registry from './registry.js';
 import {
   ROLE_DEVICE,
@@ -504,7 +505,10 @@ async function handleHello(socket, frame) {
     // that does not would ignore the update frame, so it is never sent one.
     // The same for changing wi-fi.
     updater: role === ROLE_DEVICE && frame.updater === true,
-    wifi: role === ROLE_DEVICE && frame.wifi === true
+    wifi: role === ROLE_DEVICE && frame.wifi === true,
+    // And recognising faces: a doorbell that does not say so is never sent
+    // the list of people, which it would ignore.
+    faces: role === ROLE_DEVICE && Boolean(frame.faces) && typeof frame.faces === 'object'
   };
 
   const displaced = registry.add(deviceKey, role, socket);
@@ -550,6 +554,10 @@ async function handleHello(socket, frame) {
     onDeviceHello(device, frame).catch((err) => {
       console.error(`Could not record software for ${device.deviceId}:`, err.message);
     });
+    // Which list of people it has; behind, it is sent the current one.
+    onFacesHello(device, frame).catch((err) => {
+      console.error(`Could not bring ${device.deviceId}'s faces up to date:`, err.message);
+    });
     // Last, and after presence: a viewer's browser should have the
     // doorbell showing as connected before the call it asked for
     // arrives, not after.
@@ -588,6 +596,12 @@ async function routeFrame(socket, frame) {
       if (role !== ROLE_DEVICE) return;
       return handleUpdateStatus(socket.ctx.device, frame).catch((err) => {
         console.error('Update status not recorded:', err.message);
+      });
+
+    case 'faces-status':
+      if (role !== ROLE_DEVICE) return;
+      return handleFacesStatus(socket.ctx.device, frame).catch((err) => {
+        console.error('Faces status not recorded:', err.message);
       });
 
     case 'ping':

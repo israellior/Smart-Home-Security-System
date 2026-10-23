@@ -258,12 +258,16 @@ const DELETE_CONCURRENCY = 16;
  * Deleting a key that does not exist succeeds, so asking for both is free.
  */
 export async function deleteClipObjects(deviceId, eventIds) {
-  const s3 = requireClient();
   const keys = eventIds.flatMap((eventId) => [
     clipKey(deviceId, eventId),
     pendingKey(deviceId, eventId)
   ]);
+  return deleteKeys(keys);
+}
 
+/** Deletes these keys, a few at a time, and returns how many failed. */
+async function deleteKeys(keys) {
+  const s3 = requireClient();
   let failed = 0;
   for (let i = 0; i < keys.length; i += DELETE_CONCURRENCY) {
     const results = await Promise.allSettled(
@@ -321,4 +325,50 @@ export async function signReleaseDownload(version) {
 
 export function releaseSize(version) {
   return sizeOf(releaseKey(version));
+}
+
+// --- Faces -----------------------------------------------------------------
+//
+// The photos a doorbell's known people were saved from: one cropped face
+// each, JPEG, a few tens of kilobytes. Unlike clips this server does carry
+// these bytes, once, on the way in - they are small, they come from a
+// member's browser, and checking them here is simpler than signing an upload
+// for each. They go out the usual way: a signed GET, to the doorbell, which
+// codes them and keeps no picture, and to the app, to show who is saved.
+//
+// No lifecycle rule: a photo lives exactly as long as its person, and
+// deleting the person or the doorbell deletes it - see services/faces.js and
+// services/devices.js.
+
+const FACE_TYPE = 'image/jpeg';
+
+// The doorbell may be busy recording when the list arrives and get to the
+// photos late; the brief promises it at least an hour.
+const FACE_URL_TTL_SECONDS = 2 * 60 * 60;
+
+/** Ids are checked before they get here - see services/faces.js. */
+export function faceKey(deviceId, personId, photoId) {
+  return `faces/${deviceId}/${personId}/${photoId}.jpg`;
+}
+
+export async function putFacePhoto(key, bytes) {
+  await requireClient().send(
+    new PutObjectCommand({
+      Bucket: R2_BUCKET,
+      Key: key,
+      Body: bytes,
+      ContentType: FACE_TYPE,
+      ContentLength: bytes.length
+    })
+  );
+}
+
+export function signFaceDownload(key) {
+  return getSignedUrl(requireClient(), new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }), {
+    expiresIn: FACE_URL_TTL_SECONDS
+  });
+}
+
+export function deleteFaceObjects(keys) {
+  return deleteKeys(keys);
 }

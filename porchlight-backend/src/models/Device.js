@@ -42,6 +42,20 @@ const updateSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// What a doorbell said about faces in its last hello. Null when it said
+// nothing: it cannot recognise anyone, and is never sent the list.
+const facesSchema = new mongoose.Schema(
+  {
+    // Which model makes its codes - a different one means every photo has to
+    // be coded again, which the doorbell handles by reporting no revision.
+    model: { type: String, default: null },
+    // The list it last applied, from its hello or its faces-status.
+    revision: { type: Number, default: null },
+    reportedAt: { type: Date, default: null }
+  },
+  { _id: false }
+);
+
 const deviceSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true, default: 'Front Door' },
@@ -168,7 +182,16 @@ const deviceSchema = new mongoose.Schema(
     // services/notifications/index.js. On the device rather than in
     // memory so the claim is one atomic write that any number of API
     // processes agree on.
-    motionAlertedAt: { type: Date, default: null }
+    motionAlertedAt: { type: Date, default: null },
+
+    // --- Faces ---------------------------------------------------------
+    // See services/faces.js. The people are in the Person collection.
+
+    // Goes up by one every time the list of people or their photos
+    // changes. The doorbell reports the one it last applied, and anything
+    // else means it is sent the list again.
+    facesRevision: { type: Number, default: 0 },
+    faces: { type: facesSchema, default: null }
   },
   { timestamps: true }
 );

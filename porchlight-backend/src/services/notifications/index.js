@@ -4,6 +4,7 @@ import { PushSubscription } from '../../models/PushSubscription.js';
 import { NotificationDelivery } from '../../models/NotificationDelivery.js';
 import * as webPush from './channels/webPush.js';
 import * as email from './channels/email.js';
+import { knownVisitor } from '../faces.js';
 
 const CHANNELS = [webPush, email];
 
@@ -50,6 +51,28 @@ const COPY_BY_EVENT_TYPE = {
   motion: { title: 'Motion detected', body: (device) => `Movement at ${device.name}` },
   ring: { title: 'Someone rang the bell', body: (device) => `Someone is at ${device.name}` }
 };
+
+// When the doorbell recognised who it was - see services/faces.js. Only ever
+// a better sentence: a known person still notifies, exactly like anyone.
+const COPY_FOR_KNOWN_VISITOR = {
+  motion: { title: (name) => `${name} is at the door`, body: (device) => `At ${device.name}` },
+  ring: { title: (name) => `${name} rang the bell`, body: (device) => `At ${device.name}` }
+};
+
+async function copyFor(device, event) {
+  const plain = COPY_BY_EVENT_TYPE[event.type];
+  let name = null;
+  try {
+    name = await knownVisitor(device, event);
+  } catch (err) {
+    // A name is a nicety; failing to look one up must not cost the alert.
+    console.error(`Could not name the visitor at ${device.name}:`, err.message);
+  }
+  const known = name && COPY_FOR_KNOWN_VISITOR[event.type];
+  return known
+    ? { title: known.title(name), body: known.body(device) }
+    : { title: plain.title, body: plain.body(device) };
+}
 
 /**
  * Sends one event to everyone who asked to hear about it.
@@ -104,10 +127,10 @@ export async function dispatchEventNotifications(device, event) {
     subscriptions: subscriptionsByUser.get(String(m.user._id)) || []
   }));
 
-  const copy = COPY_BY_EVENT_TYPE[event.type];
+  const copy = await copyFor(device, event);
   const payload = {
     title: copy.title,
-    body: copy.body(device),
+    body: copy.body,
     url: `/devices/${device._id}/activity`,
     // One notification per doorbell per kind: a second ring replaces the
     // first on the lock screen (and alerts again) instead of stacking.

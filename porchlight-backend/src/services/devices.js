@@ -2,7 +2,13 @@ import { Device } from '../models/Device.js';
 import { Membership } from '../models/Membership.js';
 import { Event } from '../models/Event.js';
 import { Clip } from '../models/Clip.js';
-import { storageConfigured, deleteClipObjects } from '../config/storage.js';
+import { Person } from '../models/Person.js';
+import {
+  storageConfigured,
+  deleteClipObjects,
+  deleteFaceObjects,
+  faceKey
+} from '../config/storage.js';
 import { disconnectHardware } from '../signaling/index.js';
 
 /**
@@ -34,6 +40,20 @@ export async function purgeDevice(device) {
     }
   }
   await Clip.deleteMany({ device: deviceId });
+
+  // The people it knew, and their faces - the same privacy cost as the
+  // clips, and the same order: the bucket before the rows that know where
+  // the photos are.
+  const people = await Person.find({ device: deviceId }, { personId: 1, photos: 1 }).lean();
+  if (storageConfigured && device.deviceId && people.length > 0) {
+    const keys = people.flatMap((p) => p.photos.map((ph) => faceKey(device.deviceId, p.personId, ph.photoId)));
+    try {
+      await deleteFaceObjects(keys);
+    } catch (err) {
+      console.error(`Could not remove face photos for ${device.deviceId}:`, err.message);
+    }
+  }
+  await Person.deleteMany({ device: deviceId });
 
   // Mongo has no cascading deletes, so orphaned events and memberships
   // are ours to clean up. Events first: if this dies halfway, a device
