@@ -11,8 +11,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@mediapipe/tasks-vision": "1.0.1",
-    "livekit-client": "^2.22.3",
+    "@mediapipe/tasks-vision": "1.1.1",
+    "livekit-client": "^2.23.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.18.4"
