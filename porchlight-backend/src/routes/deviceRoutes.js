@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
 import {
   listDevices,
   getDevice,
@@ -30,6 +30,16 @@ import {
 import { getViewerToken, takeTalk, releaseTalk } from '../controllers/mediaController.js';
 import { requestUpdate } from '../controllers/updateController.js';
 import { scanWifi, joinWifi } from '../controllers/wifiController.js';
+import {
+  listPeople,
+  createPerson,
+  renamePerson,
+  deletePerson,
+  addPhoto,
+  deletePhoto,
+  getPhotoUrl
+} from '../controllers/faceController.js';
+import { MAX_PHOTO_BYTES } from '../services/faces.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireDeviceAccess, requireDeviceOwner } from '../middleware/deviceAccess.js';
 
@@ -118,3 +128,27 @@ deviceRoutes.post('/:deviceId/update', requireDeviceAccess, requireDeviceOwner, 
 // arrive on the socket; see services/wifi.js.
 deviceRoutes.post('/:deviceId/wifi/scan', requireDeviceAccess, requireDeviceOwner, scanWifi);
 deviceRoutes.post('/:deviceId/wifi', requireDeviceAccess, requireDeviceOwner, joinWifi);
+
+// The people this doorbell knows by face. Every member sees who is saved;
+// only an owner changes it. Photos arrive as the raw JPEG body - small, and
+// checked here before they go to the bucket - so this one route reads its
+// body itself rather than through the JSON parser every other route uses.
+// See services/faces.js for how the list reaches the doorbell.
+deviceRoutes.get('/:deviceId/faces', requireDeviceAccess, listPeople);
+deviceRoutes.post('/:deviceId/faces', requireDeviceAccess, requireDeviceOwner, createPerson);
+deviceRoutes.patch('/:deviceId/faces/:personId', requireDeviceAccess, requireDeviceOwner, renamePerson);
+deviceRoutes.delete('/:deviceId/faces/:personId', requireDeviceAccess, requireDeviceOwner, deletePerson);
+deviceRoutes.post(
+  '/:deviceId/faces/:personId/photos',
+  requireDeviceAccess,
+  requireDeviceOwner,
+  express.raw({ type: 'image/jpeg', limit: MAX_PHOTO_BYTES }),
+  addPhoto
+);
+deviceRoutes.delete(
+  '/:deviceId/faces/:personId/photos/:photoId',
+  requireDeviceAccess,
+  requireDeviceOwner,
+  deletePhoto
+);
+deviceRoutes.get('/:deviceId/faces/:personId/photos/:photoId', requireDeviceAccess, getPhotoUrl);
