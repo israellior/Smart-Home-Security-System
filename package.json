@@ -11,11 +11,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@mediapipe/tasks-vision": "1.0.1",
-    "livekit-client": "^2.22.3",
+    "@mediapipe/tasks-vision": "1.2.0",
+    "livekit-client": "^2.23.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^7.18.4"
+    "react-router-dom": "^7.18.5"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.7.0",
